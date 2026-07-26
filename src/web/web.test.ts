@@ -394,8 +394,8 @@ describe("GET /app/:id", () => {
 
     const body = await (await handle(req(`/app/${appId}`), { store })).text();
     expect(body).toContain("3 releases");
-    expect(body).toContain("2</strong> in inbox");
-    expect(body).toContain("1 dismissed");
+    expect(body).toContain('data-count="app-inbox">2<');
+    expect(body).toContain('data-count="app-dismissed">1<');
     expect(body).toContain("2 history");
     store.close();
   });
@@ -413,7 +413,7 @@ describe("GET /app/:id", () => {
     expect(hidden).not.toContain("v0.12.0"); // the dismissed one
     expect(hidden).toContain("v9.9.9");
     // Counts still describe the whole app, not just what is rendered.
-    expect(hidden).toContain("1 dismissed");
+    expect(hidden).toContain('data-count="app-dismissed">1<');
     store.close();
   });
 
@@ -426,6 +426,162 @@ describe("GET /app/:id", () => {
     store.insertRelease({ app_id: appId, ext_id: "h", backfilled: true });
     expect(await (await handle(req(`/app/${appId}`), { store })).text()).toContain(
       "never be emailed",
+    );
+    store.close();
+  });
+});
+
+describe("dismissal — the fetch path", () => {
+  const JSON_ACCEPT = { accept: "application/json" };
+
+  test("returns JSON with fresh counts instead of a redirect", async () => {
+    const { store, releaseId } = seeded();
+    const res = await handle(
+      req(`/api/releases/${releaseId}/dismiss`, {
+        method: "POST",
+        email: ADMIN,
+        headers: JSON_ACCEPT,
+      }),
+      { store },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await jsonBody(res);
+    expect(body["ok"]).toBe(true);
+    expect(body["dismissed"]).toBe(1);
+    // Counts ride along so the page updates its tallies without a second request.
+    expect(body["counts"]).toMatchObject({ inbox: 0 });
+    store.close();
+  });
+
+  test("carries per-app counts so the app page tally can update", async () => {
+    const { store, appId, releaseId } = seeded();
+    store.insertRelease({ app_id: appId, ext_id: "h", backfilled: true });
+
+    const res = await handle(
+      req(`/api/releases/${releaseId}/dismiss`, {
+        method: "POST",
+        email: ADMIN,
+        headers: JSON_ACCEPT,
+      }),
+      { store },
+    );
+
+    expect(await jsonBody(res)).toMatchObject({
+      app: { id: appId, total: 2, inbox: 1, dismissed: 1, history: 1 },
+    });
+    store.close();
+  });
+
+  test("reports 0 dismissed when the release was already dismissed", async () => {
+    const { store, releaseId } = seeded();
+    store.dismiss(releaseId);
+
+    const res = await handle(
+      req(`/api/releases/${releaseId}/dismiss`, {
+        method: "POST",
+        email: ADMIN,
+        headers: JSON_ACCEPT,
+      }),
+      { store },
+    );
+    expect((await jsonBody(res))["dismissed"]).toBe(0);
+    store.close();
+  });
+
+  test("dismiss-all returns how many it actually hid", async () => {
+    const { store, appId } = seeded();
+    store.insertRelease({ app_id: appId, ext_id: "b" });
+
+    const res = await handle(
+      req("/api/releases/dismiss-all", { method: "POST", email: ADMIN, headers: JSON_ACCEPT }),
+      { store },
+    );
+    const body = await jsonBody(res);
+    expect(body["dismissed"]).toBe(2);
+    expect(body["counts"]).toMatchObject({ inbox: 0 });
+    store.close();
+  });
+
+  test("app-scoped dismiss-all returns that app's counts", async () => {
+    const { store, appId } = seeded();
+    const res = await handle(
+      req(`/api/apps/${appId}/dismiss-all`, { method: "POST", email: ADMIN, headers: JSON_ACCEPT }),
+      { store },
+    );
+    expect(await jsonBody(res)).toMatchObject({
+      dismissed: 1,
+      app: { id: appId, inbox: 0, dismissed: 1 },
+    });
+    store.close();
+  });
+
+  test("still 303s a plain form post, so the no-JS path is untouched", async () => {
+    // The forms are real forms; the fetch layer is an enhancement over them.
+    const { store, releaseId } = seeded();
+    const res = await handle(
+      req(`/api/releases/${releaseId}/dismiss`, { method: "POST", email: ADMIN }),
+      { store },
+    );
+    expect(res.status).toBe(303);
+    store.close();
+  });
+
+  test("an unauthorised fetch still gets the gate, not JSON", async () => {
+    const { store, releaseId } = seeded();
+    const res = await handle(
+      req(`/api/releases/${releaseId}/dismiss`, { method: "POST", headers: JSON_ACCEPT }),
+      { store },
+    );
+    // 302 to login — the script falls back to a form submit on a non-2xx,
+    // which lands the browser on the login page rather than failing silently.
+    expect(res.status).toBe(302);
+    expect(store.listReleases()).toHaveLength(1);
+    store.close();
+  });
+});
+
+describe("progressive enhancement markup", () => {
+  test("dismiss forms are real forms, annotated for the script", async () => {
+    const { store, releaseId } = seeded();
+    const body = await (await handle(req("/", { email: ADMIN }), { store })).text();
+
+    // Real method and action, so it works with the script absent.
+    expect(body).toContain('method="post"');
+    expect(body).toContain(`action="${url(`/api/releases/${releaseId}/dismiss`)}"`);
+    expect(body).toContain(`data-dismiss="${releaseId}"`);
+    expect(body).toContain(`id="release-${releaseId}"`);
+    expect(body).toContain("data-dismiss-all");
+    store.close();
+  });
+
+  test("counts are addressable so they can update in place", async () => {
+    const { store, appId } = seeded();
+    const inbox = await (await handle(req("/"), { store })).text();
+    expect(inbox).toContain('data-count="inbox"');
+
+    const appPage = await (await handle(req(`/app/${appId}`), { store })).text();
+    expect(appPage).toContain('data-count="app-inbox"');
+    expect(appPage).toContain('data-count="app-dismissed"');
+    store.close();
+  });
+
+  test("tells the script whether dismissed rows stay on screen", async () => {
+    const { store, appId } = seeded();
+
+    // Inbox hides them, so a dismissed card is removed…
+    expect(await (await handle(req("/"), { store })).text()).toContain(
+      'data-shows-dismissed="0"',
+    );
+    // …but the "all" view and app history keep them, so it relabels instead.
+    expect(await (await handle(req("/?all=1"), { store })).text()).toContain(
+      'data-shows-dismissed="1"',
+    );
+    expect(await (await handle(req(`/app/${appId}`), { store })).text()).toContain(
+      'data-shows-dismissed="1"',
+    );
+    expect(await (await handle(req(`/app/${appId}?hide=1`), { store })).text()).toContain(
+      'data-shows-dismissed="0"',
     );
     store.close();
   });
@@ -475,9 +631,10 @@ describe("POST /api/apps/:id/dismiss-all", () => {
     expect(await (await handle(req(`/app/${appId}`), { store })).text()).not.toContain(
       "Dismiss all",
     );
-    expect(
-      await (await handle(req(`/app/${appId}`, { email: ADMIN }), { store })).text(),
-    ).toContain("Dismiss all 1 in Neovim");
+    const admin = await (await handle(req(`/app/${appId}`, { email: ADMIN }), { store })).text();
+    expect(admin).toContain("Dismiss all");
+    expect(admin).toContain("data-dismiss-all-count>1<");
+    expect(admin).toContain("in Neovim");
 
     store.dismiss(releaseId);
     expect(

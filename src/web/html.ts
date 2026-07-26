@@ -120,6 +120,17 @@ article.release {
   padding: .9rem 1rem; margin-bottom: .7rem;
 }
 article.release.dismissed { opacity: .55; }
+/* The fetch path removes a card in place; this keeps that from being a jump cut.
+   Height is animated too, so the cards below slide up rather than snap. */
+article.release { transition: opacity .18s ease, transform .18s ease; }
+article.release.leaving {
+  opacity: 0; transform: translateX(-8px); pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  article.release { transition: none; }
+  article.release.leaving { transform: none; }
+}
+button[data-busy] { opacity: .5; cursor: progress; }
 .rhead { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
 .rhead .app { font-weight: 600; }
 .rhead .tag { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: .85rem; }
@@ -168,12 +179,111 @@ form.add input[name="ref"] { flex: 1 1 18rem; }
 footer.foot { margin-top: 2.5rem; color: var(--muted); font-size: .8rem; }
 `;
 
+/**
+ * Progressive enhancement for dismissals.
+ *
+ * The forms below are real forms and work with this script absent or broken —
+ * that is deliberate, and it is why the server still answers a plain POST with
+ * a 303. What this adds is the interactive path: a fetch, an in-place update,
+ * and no navigation, so a dismissal doesn't cost a full page render or leave a
+ * redirect sitting in the history stack for Back to land on.
+ *
+ * Inline and dependency-free, because "no SPA, no build step" (DESIGN §3) is a
+ * property worth keeping.
+ */
+const SCRIPT = `
+(function () {
+  var main = document.querySelector("main");
+  if (!main || !window.fetch) return;
+  var showsDismissed = main.dataset.showsDismissed === "1";
+
+  function setCount(name, value) {
+    document.querySelectorAll('[data-count="' + name + '"]').forEach(function (el) {
+      el.textContent = String(value);
+    });
+  }
+
+  function markDismissed(card) {
+    if (!card || card.classList.contains("dismissed")) return;
+    card.classList.add("dismissed");
+    var actions = card.querySelector(".actions");
+    if (actions) actions.remove();
+    if (showsDismissed) {
+      var when = card.querySelector(".when");
+      var badge = document.createElement("span");
+      badge.className = "badge dismissed-tag";
+      badge.textContent = "dismissed";
+      if (when) when.parentNode.insertBefore(badge, when);
+    } else {
+      // Animate out, then remove. The empty state has to appear once the last
+      // card goes, or the page just looks broken.
+      card.classList.add("leaving");
+      window.setTimeout(function () {
+        card.remove();
+        if (!document.querySelector("article.release")) window.location.reload();
+      }, 180);
+    }
+  }
+
+  function applyCounts(data) {
+    if (data.counts) setCount("inbox", data.counts.inbox);
+    if (data.app) {
+      setCount("app-inbox", data.app.inbox);
+      setCount("app-dismissed", data.app.dismissed);
+    }
+    document.querySelectorAll("[data-dismiss-all-count]").forEach(function (el) {
+      var n = data.app ? data.app.inbox : data.counts ? data.counts.inbox : 0;
+      var form = el.closest("form");
+      if (n > 0) { el.textContent = String(n); } else if (form) { form.remove(); }
+    });
+  }
+
+  main.addEventListener("submit", function (ev) {
+    var form = ev.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    var single = form.dataset.dismiss;
+    var all = form.dataset.dismissAll;
+    if (single === undefined && all === undefined) return;
+
+    ev.preventDefault();
+    var button = form.querySelector("button");
+    if (button) { button.disabled = true; button.dataset.busy = "1"; }
+
+    fetch(form.action, {
+      method: "POST",
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("status " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (single !== undefined) {
+          markDismissed(document.getElementById("release-" + single));
+        } else {
+          main.querySelectorAll("article.release:not(.dismissed)").forEach(markDismissed);
+        }
+        applyCounts(data);
+      })
+      .catch(function () {
+        // Anything unexpected — a 403 after a session expired, a network drop —
+        // hands back to the plain form submit rather than silently doing nothing.
+        if (button) { button.disabled = false; delete button.dataset.busy; }
+        form.submit();
+      });
+  });
+})();
+`;
+
 export interface LayoutOptions {
   title: string;
   body: SafeHtml;
+  /** True on views that keep dismissed releases on screen (per-app history). */
+  showsDismissed?: boolean;
 }
 
-export function layout({ title, body }: LayoutOptions): string {
+export function layout({ title, body, showsDismissed }: LayoutOptions): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -183,7 +293,9 @@ export function layout({ title, body }: LayoutOptions): string {
 <title>${h(title)}</title>
 <style>${STYLES}</style>
 </head>
-<body><main>${body.value}</main></body>
+<body><main data-shows-dismissed="${showsDismissed ? "1" : "0"}">${body.value}</main>
+<script>${SCRIPT}</script>
+</body>
 </html>`;
 }
 

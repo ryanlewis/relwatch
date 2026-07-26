@@ -27,6 +27,36 @@ function htmlResponse(body: string, status = 200): Response {
   });
 }
 
+/**
+ * A caller that asked for JSON gets JSON; a plain form POST gets a redirect.
+ *
+ * This is what keeps the dashboard working with JavaScript disabled: the forms
+ * are real forms, and the fetch path is an enhancement layered over them rather
+ * than a replacement for them.
+ */
+function wantsJson(req: Request): boolean {
+  return (req.headers.get("accept") ?? "").includes("application/json");
+}
+
+/**
+ * Result of a dismissal, for the fetch path. Counts come back with it so the
+ * page can update its tallies without a second request.
+ */
+function dismissResult(store: Store, dismissed: number, appId?: number): Response {
+  const body: Record<string, unknown> = { ok: true, dismissed, counts: store.counts() };
+  if (appId !== undefined) {
+    const releases = store.listAppHistory(appId);
+    body["app"] = {
+      id: appId,
+      total: releases.length,
+      inbox: releases.filter((r) => r.dismissed_at === null).length,
+      dismissed: releases.filter((r) => r.dismissed_at !== null).length,
+      history: releases.filter((r) => r.backfilled).length,
+    };
+  }
+  return Response.json(body);
+}
+
 /** After a mutation, bounce back where the user came from. */
 function redirectBack(req: Request, fallback = url("/")): Response {
   const referer = req.headers.get("referer");
@@ -83,14 +113,19 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
 
     const dismissMatch = /^\/api\/releases\/(\d+)\/dismiss$/.exec(path);
     if (dismissMatch) {
-      store.dismiss(Number(dismissMatch[1]));
+      const id = Number(dismissMatch[1]);
+      const changed = store.dismiss(id);
+      if (wantsJson(req)) {
+        const release = store.getRelease(id);
+        return dismissResult(store, changed ? 1 : 0, release?.app_id);
+      }
       return redirectBack(req);
     }
 
     if (path === "/api/releases/dismiss-all") {
       const n = store.dismissAll();
       console.log(`[web] dismissed ${n} releases`);
-      return redirectBack(req);
+      return wantsJson(req) ? dismissResult(store, n) : redirectBack(req);
     }
 
     const appDismissMatch = /^\/api\/apps\/(\d+)\/dismiss-all$/.exec(path);
@@ -98,7 +133,9 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
       const appId = Number(appDismissMatch[1]);
       const n = store.dismissAll(appId);
       console.log(`[web] dismissed ${n} releases for app ${appId}`);
-      return redirectBack(req, url(`/app/${appId}`));
+      return wantsJson(req)
+        ? dismissResult(store, n, appId)
+        : redirectBack(req, url(`/app/${appId}`));
     }
 
     if (path === "/api/apps") return addApp(req, store);

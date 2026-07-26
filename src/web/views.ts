@@ -31,14 +31,21 @@ export function renderInbox(view: InboxView): string {
         </p>`
       : releases.map((r) => releaseCard(r, isAdmin, view.now))}
     ${isAdmin && releases.length > 0 && !all
-      ? html`<form class="inline" method="post" action="${url("/api/releases/dismiss-all")}">
-          <button class="danger" type="submit">Dismiss all ${releases.length}</button>
+      ? html`<form
+          class="inline"
+          method="post"
+          action="${url("/api/releases/dismiss-all")}"
+          data-dismiss-all="1"
+        >
+          <button class="danger" type="submit">
+            Dismiss all <span data-dismiss-all-count>${releases.length}</span>
+          </button>
         </form>`
       : ""}
     ${footer()}
   `;
 
-  return layout({ title: "relwatch", body });
+  return layout({ title: "relwatch", body, showsDismissed: all });
 }
 
 export interface AppView {
@@ -75,15 +82,23 @@ export function renderApp(view: AppView): string {
     </p>
     <p class="meta tally">
       ${releases.length} release${releases.length === 1 ? "" : "s"} ·
-      <strong>${inbox.length}</strong> in inbox · ${dismissed} dismissed ·
+      <strong data-count="app-inbox">${inbox.length}</strong> in inbox ·
+      <span data-count="app-dismissed">${dismissed}</span> dismissed ·
       ${history} history
     </p>
     <nav class="filters">
       ${filterLink("Show all", appUrl, hideDismissed !== true)}
       ${filterLink("Inbox only", `${appUrl}?hide=1`, hideDismissed === true)}
       ${isAdmin && inbox.length > 0
-        ? html`<form class="inline" method="post" action="${url(`/api/apps/${app.id}/dismiss-all`)}">
-            <button class="danger" type="submit">Dismiss all ${inbox.length} in ${app.name}</button>
+        ? html`<form
+            class="inline"
+            method="post"
+            action="${url(`/api/apps/${app.id}/dismiss-all`)}"
+            data-dismiss-all="1"
+          >
+            <button class="danger" type="submit">
+              Dismiss all <span data-dismiss-all-count>${inbox.length}</span> in ${app.name}
+            </button>
           </form>`
         : ""}
     </nav>
@@ -104,7 +119,7 @@ export function renderApp(view: AppView): string {
     ${footer()}
   `;
 
-  return layout({ title: `${app.name} — relwatch`, body });
+  return layout({ title: `${app.name} — relwatch`, body, showsDismissed: !hideDismissed });
 }
 
 export interface RosterView {
@@ -174,7 +189,7 @@ function header(counts: InboxView["counts"], isAdmin: boolean): SafeHtml {
     <header class="top">
       <h1><a href="${url("/")}">relwatch</a></h1>
       <span class="meta">
-        ${counts.inbox} in inbox · ${counts.apps} apps ·
+        <span data-count="inbox">${counts.inbox}</span> in inbox · ${counts.apps} apps ·
         <a href="${url("/roster")}">roster</a>
         ${isAdmin ? "" : html` · <a href="/__exe.dev/login">sign in</a>`}
       </span>
@@ -211,7 +226,7 @@ function releaseCard(
   const dismissed = r.dismissed_at !== null;
 
   return html`
-    <article class="release ${dismissed ? "dismissed" : ""}">
+    <article class="release ${dismissed ? "dismissed" : ""}" id="release-${r.id}">
       <div class="rhead">
         ${opts.showApp === false
           ? ""
@@ -231,7 +246,12 @@ function releaseCard(
         : ""}
       ${isAdmin && !dismissed
         ? html`<div class="actions">
-            <form class="inline" method="post" action="${url(`/api/releases/${r.id}/dismiss`)}">
+            <form
+              class="inline"
+              method="post"
+              action="${url(`/api/releases/${r.id}/dismiss`)}"
+              data-dismiss="${r.id}"
+            >
               <button type="submit">Dismiss</button>
             </form>
           </div>`
