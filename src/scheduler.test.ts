@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DIGEST_CRON, POLL_CRON, TZ } from "./config.js";
 import { Store } from "./db.js";
-import { guard, pollAndTriage, startScheduler, type SchedulerDeps } from "./scheduler.js";
+import { guard, pollAndTriage, safeCron, startScheduler, type SchedulerDeps } from "./scheduler.js";
 import type { SourceRegistry } from "./poll.js";
 import type { FetchOptions, FetchResult, Source } from "./source/index.js";
 import { ProviderError, type Provider } from "./triage/index.js";
@@ -194,6 +194,35 @@ describe("startScheduler", () => {
     expect(pollGap).toBeLessThanOrEqual(6 * 60 * 60 * 1000);
     expect(digestGap).toBe(24 * 60 * 60 * 1000);
 
+    scheduler.stop();
+    d.store.close();
+  });
+});
+
+describe("safeCron", () => {
+  test("passes a valid pattern straight through", () => {
+    expect(safeCron("0 */6 * * *", "0 8 * * *", "RW_POLL_CRON")).toBe("0 */6 * * *");
+  });
+
+  test("falls back on the exact shape an unquoted systemd Environment= produces", () => {
+    // systemd splits Environment= on whitespace, so `RW_POLL_CRON=0 */6 * * *`
+    // arrives as "0". This crash-looped the real service under
+    // Restart=on-failure until it was caught.
+    expect(safeCron("0", "0 */6 * * *", "RW_POLL_CRON")).toBe("0 */6 * * *");
+  });
+
+  test("falls back on other malformed patterns rather than throwing", () => {
+    expect(safeCron("", "0 8 * * *", "RW_DIGEST_CRON")).toBe("0 8 * * *");
+    expect(safeCron("not a cron", "0 8 * * *", "RW_DIGEST_CRON")).toBe("0 8 * * *");
+    expect(safeCron("99 99 99 99 99", "0 8 * * *", "RW_DIGEST_CRON")).toBe("0 8 * * *");
+  });
+
+  test("a service with a broken pattern still schedules on the fallback", () => {
+    const d = deps();
+    const scheduler = startScheduler(d);
+    // Whatever the env holds, both jobs must end up with a real next run —
+    // no dashboard is worse than a wrong schedule.
+    for (const job of scheduler.jobs) expect(job.nextRun()).not.toBeNull();
     scheduler.stop();
     d.store.close();
   });

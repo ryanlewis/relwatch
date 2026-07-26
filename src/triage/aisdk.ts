@@ -101,6 +101,20 @@ const openaiGenerate: Generate = async (prompt, abortSignal) => {
     // outright, so it is deliberately not set anywhere.
     providerOptions: { openai: { store: false } },
   });
+
+  // The stream MUST be drained before awaiting `.object`.
+  //
+  // `streamObject` is lazy: nothing is pulled from the underlying response
+  // until something consumes it, so `await stream.object` on its own never
+  // settles. Verified against the live gateway — draining first yields the
+  // object in ~6 s, while awaiting `.object` alone sat there until the 90 s
+  // abort fired and then failed. Every triage call would have done that.
+  //
+  // (DESIGN §4.4's sample shows the bare `await s.object`; it is wrong.)
+  // Partials are discarded deliberately — the dashboard has no use for a
+  // half-formed triage; draining is the point.
+  for await (const partial of stream.partialObjectStream) void partial;
+
   return await stream.object;
 };
 

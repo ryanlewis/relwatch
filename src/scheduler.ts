@@ -55,18 +55,48 @@ export interface Scheduler {
   stop(): void;
 }
 
+/** The defaults a bad pattern falls back to, so the service still runs. */
+const FALLBACK_POLL_CRON = "0 */6 * * *";
+const FALLBACK_DIGEST_CRON = "0 8 * * *";
+
+/**
+ * Validate a cron pattern, falling back loudly rather than throwing.
+ *
+ * A rejected pattern used to take the whole service down at startup, which
+ * under `Restart=on-failure` is a crash loop: no dashboard, no polling, no
+ * digest. Observed for real — systemd splits `Environment=` on whitespace, so
+ * an unquoted six-field cron value arrives as just its first field, `0`.
+ * Falling back keeps every other surface working while the log says exactly
+ * what is wrong and how to fix it.
+ */
+export function safeCron(pattern: string, fallback: string, name: string): string {
+  try {
+    new Cron(pattern, { paused: true }).stop();
+    return pattern;
+  } catch (err) {
+    console.error(
+      `[scheduler] ${name} pattern ${JSON.stringify(pattern)} is invalid ` +
+        `(${err instanceof Error ? err.message : String(err)}); falling back to "${fallback}". ` +
+        `If this came from systemd, quote it: Environment="${name}=${fallback}"`,
+    );
+    return fallback;
+  }
+}
+
 export function startScheduler(deps: SchedulerDeps): Scheduler {
   // `protect` skips a run while the previous one is still going — a poll cycle
   // that outruns its 6-hourly slot must queue behind itself, not race itself
   // into the same rows. It only works because the callbacks below are async and
   // croner awaits them; returning early would make every run look instant.
   const options = { timezone: TZ, protect: true } as const;
+  const pollPattern = safeCron(POLL_CRON, FALLBACK_POLL_CRON, "RW_POLL_CRON");
+  const digestPattern = safeCron(DIGEST_CRON, FALLBACK_DIGEST_CRON, "RW_DIGEST_CRON");
 
-  const pollJob = new Cron(POLL_CRON, options, async () => {
+  const pollJob = new Cron(pollPattern, options, async () => {
     await guard("poll", () => pollAndTriage(deps));
   });
 
-  const digestJob = new Cron(DIGEST_CRON, options, async () => {
+  const digestJob = new Cron(digestPattern, options, async () => {
     await guard("digest", async () => {
       await runDigest(deps.store, deps.digest);
       // Piggy-backed on the digest rather than given its own schedule: the
@@ -77,8 +107,8 @@ export function startScheduler(deps: SchedulerDeps): Scheduler {
 
   const jobs = [pollJob, digestJob];
   console.log(
-    `[scheduler] poll "${POLL_CRON}" next ${describeNext(pollJob)}; ` +
-      `digest "${DIGEST_CRON}" next ${describeNext(digestJob)} (${TZ})`,
+    `[scheduler] poll "${pollPattern}" next ${describeNext(pollJob)}; ` +
+      `digest "${digestPattern}" next ${describeNext(digestJob)} (${TZ})`,
   );
 
   return {

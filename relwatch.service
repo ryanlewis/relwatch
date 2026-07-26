@@ -1,0 +1,40 @@
+[Unit]
+Description=relwatch — release tracker, dashboard and daily digest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exedev
+Group=exedev
+WorkingDirectory=/home/exedev/relwatch
+# The compiled binary from `bun build --compile`, so the unit doesn't depend on
+# bun resolving on PATH under systemd.
+ExecStart=/home/exedev/relwatch/relwatch
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=6
+
+Environment=NODE_ENV=production
+Environment=RW_PORT=8001
+# Served behind Caddy at relwatch.example.com; every link and form action is
+# built from this prefix, so it must match the Caddy route.
+Environment=RW_BASE_PATH=/analytics
+Environment=RW_DB=/home/exedev/.local/share/relwatch/relwatch.db
+Environment=RW_TZ=Europe/London
+# Quoted: systemd splits Environment= on whitespace, so an unquoted cron
+# pattern arrives as just "0" and croner rejects it at startup.
+Environment="RW_POLL_CRON=0 */6 * * *"
+Environment="RW_DIGEST_CRON=0 8 * * *"
+Environment=RW_ADMIN_EMAILS=you@example.com
+# Default backend is the ChatGPT-subscription tier, billed outside the exe.dev
+# token allocation. Set RW_BACKEND=anthropic to switch tiers.
+Environment=RW_BACKEND=openai-responses
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relwatch
+
+[Install]
+WantedBy=multi-user.target
