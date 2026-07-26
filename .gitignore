@@ -9,3 +9,7 @@ roster.json
 coverage/
 .claude/settings.local.json
 relwatch
+# Both compile targets are deploy artifacts: 96 MB of incompressible binary
+# that never deltas, so a checked-in copy costs the full size every build.
+# Deploy is build-then-scp; see PLAN.md M7.
+relwatch-linux
