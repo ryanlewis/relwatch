@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Store } from "./db.js";
+import { getStore, Store } from "./db.js";
 
 function freshStore(): Store {
   return new Store(":memory:");
@@ -18,6 +18,14 @@ describe("migrations", () => {
     // Re-running the migrator must be a no-op, not a second CREATE TABLE.
     expect(() => new Store(":memory:")).not.toThrow();
     s.close();
+  });
+});
+
+describe("getStore", () => {
+  test("returns the same instance on repeated calls", () => {
+    // The service opens one connection for its whole life; a second would take
+    // its own WAL lock and defeat the busy_timeout.
+    expect(getStore(":memory:")).toBe(getStore(":memory:"));
   });
 });
 

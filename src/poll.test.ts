@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Store } from "./db.js";
-import { poll, type SourceRegistry } from "./poll.js";
+import { defaultSources, poll, type SourceRegistry } from "./poll.js";
 import { SourceError, type FetchOptions, type FetchResult, type Source } from "./source/index.js";
 
 /** A source that replays scripted results and records what it was asked for. */
@@ -50,6 +50,16 @@ function storeWithApp(ref = "o/r") {
   const app = store.upsertApp({ name: "R", kind: "github", ref });
   return { store, app };
 }
+
+describe("defaultSources", () => {
+  test("registers a source for every app kind the schema allows", () => {
+    // A kind with no source would fail at runtime for that app only, which is
+    // exactly the sort of thing that hides until a roster edit trips it.
+    const sources = defaultSources();
+    expect(sources.github.kind).toBe("github");
+    expect(sources.rss.kind).toBe("rss");
+  });
+});
 
 describe("poll", () => {
   test("inserts new releases and reports them as the triage worklist", async () => {
