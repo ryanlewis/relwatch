@@ -39,7 +39,11 @@ function sourcesReturning(extIds: string[]): SourceRegistry {
 
 function deps(over: Partial<SchedulerDeps> = {}): SchedulerDeps {
   const store = over.store ?? new Store(":memory:");
-  if (!over.store) store.upsertApp({ name: "N", kind: "github", ref: "n/n" });
+  if (!over.store) {
+    // Seeded, so these tests exercise steady state rather than an app's
+    // seeding poll (where every release is history by design).
+    store.markSeeded(store.upsertApp({ name: "N", kind: "github", ref: "n/n" }).id, "2020-01-01T00:00:00.000Z");
+  }
   return {
     store,
     provider: over.provider ?? new StubProvider(),

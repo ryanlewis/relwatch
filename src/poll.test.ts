@@ -45,10 +45,16 @@ function registry(github: Source, rss?: Source): SourceRegistry {
   };
 }
 
-function storeWithApp(ref = "o/r") {
+/**
+ * A store with one app. `seeded` marks it as already watched, which is the
+ * steady state most of these tests are about — an unseeded app's first poll is
+ * its seeding poll, and everything it returns is history by design.
+ */
+function storeWithApp(ref = "o/r", opts: { seeded?: boolean } = {}) {
   const store = new Store(":memory:");
   const app = store.upsertApp({ name: "R", kind: "github", ref });
-  return { store, app };
+  if (opts.seeded !== false) store.markSeeded(app.id, "2020-01-01T00:00:00.000Z");
+  return { store, app: store.getApp(app.id)! };
 }
 
 describe("defaultSources", () => {
@@ -107,8 +113,9 @@ describe("poll", () => {
 
   test("one app failing never stops the cycle", async () => {
     const store = new Store(":memory:");
-    store.upsertApp({ name: "Bad", kind: "github", ref: "bad/repo" });
-    store.upsertApp({ name: "Good", kind: "github", ref: "good/repo" });
+    for (const ref of ["bad/repo", "good/repo"]) {
+      store.markSeeded(store.upsertApp({ name: ref, kind: "github", ref }).id, "2020-01-01T00:00:00.000Z");
+    }
 
     const gh = new FakeSource("github", (ref) => {
       if (ref === "bad/repo") throw new SourceError("GitHub 404 for bad/repo", 404);
@@ -148,8 +155,11 @@ describe("poll", () => {
 
   test("routes each app to the source for its kind", async () => {
     const store = new Store(":memory:");
-    store.upsertApp({ name: "G", kind: "github", ref: "o/r" });
-    store.upsertApp({ name: "F", kind: "rss", ref: "https://example.com/feed" });
+    store.markSeeded(store.upsertApp({ name: "G", kind: "github", ref: "o/r" }).id, "2020-01-01T00:00:00.000Z");
+    store.markSeeded(
+      store.upsertApp({ name: "F", kind: "rss", ref: "https://example.com/feed" }).id,
+      "2020-01-01T00:00:00.000Z",
+    );
 
     const gh = new FakeSource("github", () => ok([{ ext_id: "g" }]));
     const rss = new FakeSource("rss", () => ok([{ ext_id: "f" }]));
@@ -186,7 +196,7 @@ describe("poll", () => {
 
 describe("poll — the seed watermark", () => {
   test("stamps seeded_at on the first successful poll and never moves it", async () => {
-    const { store, app } = storeWithApp();
+    const { store, app } = storeWithApp("o/r", { seeded: false });
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
 
     expect(store.getApp(app.id)!.seeded_at).toBeNull();
@@ -201,7 +211,7 @@ describe("poll — the seed watermark", () => {
   });
 
   test("treats a release published before seeding as history, not news", async () => {
-    const { store } = storeWithApp();
+    const { store } = storeWithApp("o/r", { seeded: false });
     // Backfill takes the newest 5; the next poll's wider page reaches further
     // back. Those extra releases are old, and must not be emailed.
     const gh = new FakeSource("github", (_ref, opts) =>
@@ -224,8 +234,54 @@ describe("poll — the seed watermark", () => {
     store.close();
   });
 
+  test("an app whose backfill failed does not email its back catalogue", async () => {
+    const { store } = storeWithApp("o/r", { seeded: false });
+    // Forgejo did exactly this: its backfill timed out, so it had no
+    // watermark, and the next poll queued 10 releases going back to April.
+    const failing = new FakeSource("github", () => {
+      throw new SourceError("The operation timed out.");
+    });
+    await poll(store, registry(failing), { backfill: true });
+
+    const working = new FakeSource("github", () =>
+      ok([
+        { ext_id: "a", published_at: "2026-07-21T08:00:00.000Z" },
+        { ext_id: "b", published_at: "2026-04-29T13:00:00.000Z" },
+      ]),
+    );
+    const summary = await poll(store, registry(working));
+
+    expect(summary.inserted).toBe(2);
+    expect(summary.backfilled).toBe(2);
+    expect(store.digestSet()).toEqual([]);
+    store.close();
+  });
+
+  test("an app added to the roster later starts from history, not its back catalogue", async () => {
+    const store = new Store(":memory:");
+    // DESIGN §5.1 lets an app be added through the dashboard at any time. Its
+    // first poll must not treat years of releases as today's news.
+    const app = store.upsertApp({ name: "Late", kind: "github", ref: "late/app" });
+    const gh = new FakeSource("github", () =>
+      ok([
+        { ext_id: "1", published_at: "2025-01-01T00:00:00.000Z" },
+        { ext_id: "2", published_at: "2024-01-01T00:00:00.000Z" },
+      ]),
+    );
+
+    const first = await poll(store, registry(gh));
+    expect(first.newReleases).toEqual([]);
+    expect(first.backfilled).toBe(2);
+    expect(store.digestSet()).toEqual([]);
+    expect(store.getApp(app.id)!.seeded_at).not.toBeNull();
+
+    // Its history is browsable straight away, which is the point.
+    expect(store.listAppHistory(app.id)).toHaveLength(2);
+    store.close();
+  });
+
   test("a genuinely new release after seeding is news and gets emailed", async () => {
-    const { store } = storeWithApp();
+    const { store } = storeWithApp("o/r", { seeded: false });
     const future = new Date(Date.now() + 60_000).toISOString();
     const gh = new FakeSource("github", (_ref, opts) =>
       opts.limit === 5
@@ -299,7 +355,7 @@ describe("poll — rate limiting", () => {
 
 describe("poll — backfill", () => {
   test("marks rows backfilled and keeps them off the triage worklist", async () => {
-    const { store } = storeWithApp();
+    const { store } = storeWithApp("o/r", { seeded: false });
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }, { ext_id: "2" }]));
 
     const summary = await poll(store, registry(gh), { backfill: true });
@@ -313,7 +369,7 @@ describe("poll — backfill", () => {
   });
 
   test("backfilled history is still browsable in the dashboard", async () => {
-    const { store, app } = storeWithApp();
+    const { store, app } = storeWithApp("o/r", { seeded: false });
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
     await poll(store, registry(gh), { backfill: true });
     expect(store.listReleases()).toHaveLength(1);
@@ -322,7 +378,7 @@ describe("poll — backfill", () => {
   });
 
   test("asks for BACKFILL_DEPTH and ignores the stored ETag", async () => {
-    const { store, app } = storeWithApp();
+    const { store, app } = storeWithApp("o/r", { seeded: false });
     store.setEtag(app.id, 'W/"stale"');
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
 
@@ -335,7 +391,7 @@ describe("poll — backfill", () => {
   });
 
   test("a later real poll still triages a release first seen as backfill", async () => {
-    const { store } = storeWithApp();
+    const { store } = storeWithApp("o/r", { seeded: false });
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
 
     await poll(store, registry(gh), { backfill: true });

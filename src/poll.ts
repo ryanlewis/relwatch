@@ -101,8 +101,17 @@ export async function poll(
         continue;
       }
 
+      // No watermark yet means this poll *is* the app's seeding poll, so
+      // everything it returns is history by definition. Covers two cases the
+      // timestamp comparison alone misses: an app whose backfill failed (seen
+      // for real — Forgejo timed out, and its next poll queued 10 releases
+      // going back to April for the digest), and an app added through the
+      // dashboard later, whose first poll must not email its back catalogue.
+      const seeding = app.seeded_at === null;
+
       for (const fetched of result.releases) {
-        const asHistory = opts.backfill === true || isPreSeed(app, fetched.published_at);
+        const asHistory =
+          opts.backfill === true || seeding || isPreSeed(app, fetched.published_at);
         const row = store.insertRelease(toNewRelease(app, fetched, asHistory));
         if (row) {
           summary.inserted++;
