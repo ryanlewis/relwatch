@@ -19,7 +19,7 @@ import { join } from "node:path";
  * Empty/whitespace-only counts as unset: `Number("")` is 0, so a bare
  * `Environment=RW_LLM_CONCURRENCY=` would otherwise read as a deliberate 0.
  */
-function intEnv(raw: string | undefined, fallback: number, min: number): number {
+export function intEnv(raw: string | undefined, fallback: number, min: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n >= min ? Math.floor(n) : fallback;
@@ -31,7 +31,7 @@ function intEnv(raw: string | undefined, fallback: number, min: number): number 
  * become NaN, because `AbortSignal.timeout(NaN)` aborts immediately and would
  * turn every LLM call into an instant failure.
  */
-function durationEnv(raw: string | undefined, fallbackMs: number): number {
+export function durationEnv(raw: string | undefined, fallbackMs: number): number {
   if (raw === undefined || raw.trim() === "") return fallbackMs;
   const m = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/i.exec(raw.trim());
   if (!m) return fallbackMs;
@@ -43,7 +43,7 @@ function durationEnv(raw: string | undefined, fallbackMs: number): number {
 }
 
 /** `0`/`false`/unset are false; anything else is true. */
-function boolEnv(raw: string | undefined, fallback: boolean): boolean {
+export function boolEnv(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined || raw.trim() === "") return fallback;
   const v = raw.trim().toLowerCase();
   if (v === "0" || v === "false" || v === "no") return false;
@@ -51,7 +51,7 @@ function boolEnv(raw: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
-function expandHome(p: string): string {
+export function expandHome(p: string): string {
   return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
 }
 
@@ -68,10 +68,12 @@ function expandHome(p: string): string {
 export const BACKENDS = ["openai-responses", "anthropic"] as const;
 export type Backend = (typeof BACKENDS)[number];
 
+export function isBackend(v: string): v is Backend {
+  return BACKENDS.some((b) => b === v);
+}
+
 const rawBackend = (process.env.RW_BACKEND ?? "openai-responses").trim();
-export const BACKEND: Backend = (BACKENDS as readonly string[]).includes(rawBackend)
-  ? (rawBackend as Backend)
-  : "openai-responses";
+export const BACKEND: Backend = isBackend(rawBackend) ? rawBackend : "openai-responses";
 
 // Path-prefixed routing (/openai/v1, /anthropic/v1) — it forces the provider,
 // takes plain model names, and avoids SDKs mangling a `provider/` prefix.
@@ -97,6 +99,25 @@ export const DB_PATH = expandHome(
 
 // --- Web -------------------------------------------------------------------
 export const PORT = intEnv(process.env.RW_PORT, 8000, 1);
+
+/**
+ * (not in DESIGN §7) Sub-path the dashboard is served under, because the target
+ * deployment mounts it at `relwatch.example.com` rather than a bare domain.
+ *
+ * Normalised to either "" (root) or a leading-slash, no-trailing-slash prefix,
+ * so `BASE_PATH + "/app/1"` is always well-formed. Every link, form action and
+ * redirect must go through `url()` in web/routes.ts rather than hardcoding a
+ * path — a sub-path deployment breaks silently otherwise, with forms POSTing
+ * to a 404 that looks like a permissions problem.
+ */
+export function normaliseBasePath(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (trimmed === "" || trimmed === "/") return "";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+export const BASE_PATH = normaliseBasePath(process.env.RW_BASE_PATH ?? "/analytics");
+
 // Matched against the X-ExeDev-Email header the exe.dev proxy injects. That
 // header is only trustworthy *behind* the proxy — reached directly it is
 // whatever the client says it is. See DESIGN §5.1.

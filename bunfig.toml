@@ -1,0 +1,11 @@
+[test]
+coverage = true
+coverageReporter = ["text", "lcov"]
+# The goal is 90-95%+. Thresholds are enforced, so a drop fails `bun test`
+# rather than quietly eroding.
+coverageThreshold = { line = 0.90, function = 0.90 }
+# index.ts is the systemd entrypoint: it starts a listener and wires crons, so
+# importing it under test would boot the service. Its logic lives in the modules
+# it calls, which are covered directly.
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["src/index.ts", "scripts/"]

@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "env": { "es2024": true },
+  "rules": {
+    "no-console": "off",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-floating-promises": "error",
+    "promise/no-return-wrap": "error",
+    "unicorn/prefer-node-protocol": "error"
+  },
+  "ignorePatterns": ["node_modules", "*.db"]
+}
