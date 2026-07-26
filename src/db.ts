@@ -497,10 +497,21 @@ export class Store {
     );
   }
 
-  /** The clear-the-decks button. Returns how many rows it actually hid. */
-  dismissAll(): number {
-    return this.db.run("UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL", [nowIso()])
-      .changes;
+  /**
+   * The clear-the-decks button. Returns how many rows it actually hid.
+   * Scoped to one app when `appId` is given — clearing a single noisy project
+   * shouldn't mean clearing everything else with it.
+   */
+  dismissAll(appId?: number): number {
+    const stamp = nowIso();
+    if (appId === undefined) {
+      return this.db.run("UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL", [stamp])
+        .changes;
+    }
+    return this.db.run(
+      "UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL AND app_id = ?",
+      [stamp, appId],
+    ).changes;
   }
 
   // --- Stats ---------------------------------------------------------------

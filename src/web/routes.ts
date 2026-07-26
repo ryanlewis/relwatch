@@ -73,7 +73,9 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
   if (method === "GET" && path === "/roster") return roster(req, ctx);
 
   const appMatch = /^\/app\/(\d+)$/.exec(path);
-  if (method === "GET" && appMatch) return appPage(req, ctx, Number(appMatch[1]));
+  if (method === "GET" && appMatch) {
+    return appPage(req, ctx, Number(appMatch[1]), requestUrl.searchParams.get("hide") === "1");
+  }
 
   if (method === "POST") {
     const denied = requireAdmin(req);
@@ -89,6 +91,14 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
       const n = store.dismissAll();
       console.log(`[web] dismissed ${n} releases`);
       return redirectBack(req);
+    }
+
+    const appDismissMatch = /^\/api\/apps\/(\d+)\/dismiss-all$/.exec(path);
+    if (appDismissMatch) {
+      const appId = Number(appDismissMatch[1]);
+      const n = store.dismissAll(appId);
+      console.log(`[web] dismissed ${n} releases for app ${appId}`);
+      return redirectBack(req, url(`/app/${appId}`));
     }
 
     if (path === "/api/apps") return addApp(req, store);
@@ -153,16 +163,24 @@ function inbox(req: Request, ctx: RouteContext, requestUrl: URL): Response {
   );
 }
 
-function appPage(req: Request, ctx: RouteContext, id: number): Response {
+function appPage(
+  req: Request,
+  ctx: RouteContext,
+  id: number,
+  hideDismissed: boolean,
+): Response {
   const app = ctx.store.getApp(id);
   if (!app) return new Response("no such app\n", { status: 404 });
 
   return htmlResponse(
     renderApp({
       app,
+      // Always fetch everything: the page reports counts across all three
+      // states, and `hideDismissed` only decides what is rendered.
       releases: ctx.store.listAppHistory(id),
       isAdmin: identify(req).isAdmin,
       counts: ctx.store.counts(),
+      hideDismissed,
       ...(ctx.now === undefined ? {} : { now: ctx.now }),
     }),
   );

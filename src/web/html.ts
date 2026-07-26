@@ -133,6 +133,16 @@ article.release.dismissed { opacity: .55; }
 .badge.maintenance { color: var(--maintenance); background: var(--maintenance-bg); }
 .badge.breaking { color: var(--breaking); background: var(--breaking-bg); }
 .badge.untriaged { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
+/* State badges. Deliberately quieter than the verdict badges: they describe
+   where a release sits, not how important it is. */
+.badge.history { color: var(--muted); background: transparent; border: 1px solid var(--line); }
+.badge.dismissed-tag { color: var(--muted); background: var(--maintenance-bg); }
+.tally strong { color: var(--fg); }
+.legend {
+  margin-top: 1.5rem; padding-top: .75rem; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: .82rem; line-height: 1.5;
+}
+.legend strong { color: var(--fg); font-weight: 600; }
 .summary { margin: .45rem 0 0; }
 ul.highlights { margin: .45rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .9rem; }
 .actions { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; }

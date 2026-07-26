@@ -335,6 +335,22 @@ describe("dismissAll", () => {
     expect(s.counts().releases).toBe(2);
     s.close();
   });
+
+  test("scoped to one app, it leaves every other app alone", () => {
+    const s = freshStore();
+    const a = s.upsertApp({ name: "A", kind: "github", ref: "a/a" });
+    const b = s.upsertApp({ name: "B", kind: "github", ref: "b/b" });
+    s.insertRelease({ app_id: a.id, ext_id: "a1" });
+    s.insertRelease({ app_id: a.id, ext_id: "a2" });
+    s.insertRelease({ app_id: b.id, ext_id: "b1" });
+
+    expect(s.dismissAll(a.id)).toBe(2);
+    expect(s.listReleases().map((r) => r.ext_id)).toEqual(["b1"]);
+    expect(s.dismissAll(a.id)).toBe(0);
+    // Still browsable through that app's history.
+    expect(s.listAppHistory(a.id)).toHaveLength(2);
+    s.close();
+  });
 });
 
 describe("counts and watchdog", () => {

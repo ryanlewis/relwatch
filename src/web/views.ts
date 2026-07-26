@@ -46,12 +46,24 @@ export interface AppView {
   releases: ReleaseWithApp[];
   isAdmin: boolean;
   counts: InboxView["counts"];
+  /** Hide dismissed releases on this page. */
+  hideDismissed?: boolean;
   now?: number;
 }
 
 export function renderApp(view: AppView): string {
-  const { app, releases, isAdmin } = view;
+  const { app, releases, isAdmin, hideDismissed } = view;
   const home = safeUrl(app.homepage);
+
+  // Two independent axes, which is why both get their own label on each card:
+  // dismissed-or-not (is it still in the inbox) and backfilled-or-not (is it
+  // history that will never be emailed).
+  const inbox = releases.filter((r) => r.dismissed_at === null);
+  const dismissed = releases.length - inbox.length;
+  const history = releases.filter((r) => r.backfilled).length;
+  const shown = hideDismissed ? inbox : releases;
+
+  const appUrl = url(`/app/${app.id}`);
 
   const body = html`
     ${header(view.counts, isAdmin)}
@@ -61,9 +73,34 @@ export function renderApp(view: AppView): string {
     <p class="meta">
       ${app.kind} · <code>${app.ref}</code>${home ? html` · <a href="${home}">homepage</a>` : ""}
     </p>
-    ${releases.length === 0
-      ? html`<p class="empty">No releases recorded yet.</p>`
-      : releases.map((r) => releaseCard(r, isAdmin, view.now, { showApp: false }))}
+    <p class="meta tally">
+      ${releases.length} release${releases.length === 1 ? "" : "s"} ·
+      <strong>${inbox.length}</strong> in inbox · ${dismissed} dismissed ·
+      ${history} history
+    </p>
+    <nav class="filters">
+      ${filterLink("Show all", appUrl, hideDismissed !== true)}
+      ${filterLink("Inbox only", `${appUrl}?hide=1`, hideDismissed === true)}
+      ${isAdmin && inbox.length > 0
+        ? html`<form class="inline" method="post" action="${url(`/api/apps/${app.id}/dismiss-all`)}">
+            <button class="danger" type="submit">Dismiss all ${inbox.length} in ${app.name}</button>
+          </form>`
+        : ""}
+    </nav>
+    ${shown.length === 0
+      ? html`<p class="empty">
+          ${releases.length === 0
+            ? "No releases recorded yet."
+            : "Nothing left in the inbox for this app."}
+        </p>`
+      : shown.map((r) => releaseCard(r, isAdmin, view.now, { showApp: false }))}
+    ${history > 0
+      ? html`<p class="legend">
+          <strong>history</strong> — seen during the first poll of this app, so it is
+          browsable but was never triaged and will never be emailed.
+          <strong>dismissed</strong> — acknowledged; hidden from the inbox, never deleted.
+        </p>`
+      : ""}
     ${footer()}
   `;
 
@@ -182,7 +219,8 @@ function releaseCard(
         <span class="tag">${link ? html`<a href="${link}">${title}</a>` : title}</span>
         ${verdictBadge(r)}
         ${r.breaking ? html`<span class="badge breaking">breaking</span>` : ""}
-        ${r.backfilled ? html`<span class="badge untriaged">history</span>` : ""}
+        ${r.backfilled ? html`<span class="badge history">history</span>` : ""}
+        ${dismissed ? html`<span class="badge dismissed-tag">dismissed</span>` : ""}
         <span class="when">${timeAgo(r.published_at ?? r.fetched_at, now)}</span>
       </div>
       ${r.summary ? html`<p class="summary">${r.summary}</p>` : ""}

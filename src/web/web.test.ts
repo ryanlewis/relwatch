@@ -372,6 +372,119 @@ describe("GET /app/:id", () => {
     expect((await handle(req("/app/999"), { store })).status).toBe(404);
     store.close();
   });
+
+  test("labels each release as history and/or dismissed", async () => {
+    // Two independent axes — a release can be neither, either, or both — so
+    // opacity alone can't convey the state.
+    const { store, appId, releaseId } = seeded();
+    store.insertRelease({ app_id: appId, ext_id: "old", tag: "v0.1.0", backfilled: true });
+    store.dismiss(releaseId);
+
+    const body = await (await handle(req(`/app/${appId}`), { store })).text();
+    expect(body).toContain(">history<");
+    expect(body).toContain(">dismissed<");
+    store.close();
+  });
+
+  test("tallies inbox, dismissed and history counts", async () => {
+    const { store, appId, releaseId } = seeded();
+    store.insertRelease({ app_id: appId, ext_id: "h1", backfilled: true });
+    store.insertRelease({ app_id: appId, ext_id: "h2", backfilled: true });
+    store.dismiss(releaseId);
+
+    const body = await (await handle(req(`/app/${appId}`), { store })).text();
+    expect(body).toContain("3 releases");
+    expect(body).toContain("2</strong> in inbox");
+    expect(body).toContain("1 dismissed");
+    expect(body).toContain("2 history");
+    store.close();
+  });
+
+  test("?hide=1 renders only the inbox but still counts everything", async () => {
+    const { store, appId, releaseId } = seeded();
+    store.insertRelease({ app_id: appId, ext_id: "live", tag: "v9.9.9" });
+    store.dismiss(releaseId);
+
+    const all = await (await handle(req(`/app/${appId}`), { store })).text();
+    expect(all).toContain("v0.12.0");
+    expect(all).toContain("v9.9.9");
+
+    const hidden = await (await handle(req(`/app/${appId}?hide=1`), { store })).text();
+    expect(hidden).not.toContain("v0.12.0"); // the dismissed one
+    expect(hidden).toContain("v9.9.9");
+    // Counts still describe the whole app, not just what is rendered.
+    expect(hidden).toContain("1 dismissed");
+    store.close();
+  });
+
+  test("explains the badges only when there is history to explain", async () => {
+    const { store, appId } = seeded();
+    expect(await (await handle(req(`/app/${appId}`), { store })).text()).not.toContain(
+      "never be emailed",
+    );
+
+    store.insertRelease({ app_id: appId, ext_id: "h", backfilled: true });
+    expect(await (await handle(req(`/app/${appId}`), { store })).text()).toContain(
+      "never be emailed",
+    );
+    store.close();
+  });
+});
+
+describe("POST /api/apps/:id/dismiss-all", () => {
+  test("dismisses only that app's releases", async () => {
+    const store = new Store(":memory:");
+    const a = store.upsertApp({ name: "A", kind: "github", ref: "a/a" });
+    const b = store.upsertApp({ name: "B", kind: "github", ref: "b/b" });
+    store.insertRelease({ app_id: a.id, ext_id: "a1" });
+    store.insertRelease({ app_id: a.id, ext_id: "a2" });
+    store.insertRelease({ app_id: b.id, ext_id: "b1" });
+
+    const res = await handle(
+      req(`/api/apps/${a.id}/dismiss-all`, { method: "POST", email: ADMIN }),
+      { store },
+    );
+
+    expect(res.status).toBe(303);
+    // Clearing one noisy project must not clear everything else with it.
+    expect(store.listReleases().map((r) => r.ext_id)).toEqual(["b1"]);
+    store.close();
+  });
+
+  test("redirects back to the app page", async () => {
+    const { store, appId } = seeded();
+    const res = await handle(
+      req(`/api/apps/${appId}/dismiss-all`, { method: "POST", email: ADMIN }),
+      { store },
+    );
+    expect(res.headers.get("location")).toBe(url(`/app/${appId}`));
+    store.close();
+  });
+
+  test("is gated like every other mutation", async () => {
+    const { store, appId } = seeded();
+    const res = await handle(req(`/api/apps/${appId}/dismiss-all`, { method: "POST" }), { store });
+    expect(res.status).toBe(302);
+    expect(store.listReleases()).toHaveLength(1);
+    store.close();
+  });
+
+  test("shows the button only to an admin, and only with something to dismiss", async () => {
+    const { store, appId, releaseId } = seeded();
+
+    expect(await (await handle(req(`/app/${appId}`), { store })).text()).not.toContain(
+      "Dismiss all",
+    );
+    expect(
+      await (await handle(req(`/app/${appId}`, { email: ADMIN }), { store })).text(),
+    ).toContain("Dismiss all 1 in Neovim");
+
+    store.dismiss(releaseId);
+    expect(
+      await (await handle(req(`/app/${appId}`, { email: ADMIN }), { store })).text(),
+    ).not.toContain("Dismiss all");
+    store.close();
+  });
 });
 
 describe("GET /roster", () => {
