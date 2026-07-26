@@ -4,6 +4,7 @@
 // contents, and LLM output derived from all three. None of it is trusted, so
 // `h` escapes and the `html` tag applies it to every interpolation by default.
 // Deliberate raw insertion has to go through `raw()`, which makes it greppable.
+import { TZ } from "../config.js";
 
 /**
  * Escape for HTML text and double-quoted attribute contexts.
@@ -75,108 +76,240 @@ export function safeUrl(value: string | null): string | null {
   return null;
 }
 
+/**
+ * Visual system, adapted from shout.sh (`~/dev/shout-sh/web/src/styles.css`).
+ *
+ * What is borrowed: one monospace face for everything, square corners, dashed
+ * rules as the separator of record, uppercase micro-labels at 11px/.08em, chip
+ * groups that invert when active, and `[ bracket ]` buttons that invert on
+ * hover. What is not: shout's pure-black ground. relwatch keeps its warm paper
+ * and rust accent, so the grammar is shared but the surface is its own.
+ *
+ * The mono stack is the system one rather than shout's Google-hosted JetBrains
+ * Mono — a webfont would put a network dependency in front of first paint on a
+ * dashboard that is otherwise one self-contained binary.
+ */
 const STYLES = `
 :root {
-  --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b64; --line: #e3e3dd;
-  --card: #fff; --accent: #7a4b2a;
-  --major: #8f3a1f; --major-bg: #fdefe9;
-  --interesting: #2f5d3f; --interesting-bg: #ecf5ef;
-  --maintenance: #4a4a54; --maintenance-bg: #f0f0f2;
-  --breaking: #a11b2b; --breaking-bg: #fdecee;
+  --bg: #fbfbfa; --bg-1: #f2f1ec; --card: #fff;
+  --fg: #1a1a18; --fg-1: #45453d; --fg-2: #6b6b64; --fg-3: #9c9c92;
+  --rule: #d9d9d0; --rule-strong: #b0b0a5;
+  --accent: #7a4b2a;
+  --major: #8f3a1f; --interesting: #2f5d3f; --maintenance: #6b6b64;
+  --breaking: #a11b2b;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "DejaVu Sans Mono", monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #16161a; --fg: #e8e8e3; --muted: #9a9a92; --line: #2c2c32;
-    --card: #1d1d22; --accent: #d0a077;
-    --major: #f0a58a; --major-bg: #3a201a;
-    --interesting: #9bd0ad; --interesting-bg: #1a2b20;
-    --maintenance: #b6b6c0; --maintenance-bg: #26262c;
-    --breaking: #f2929c; --breaking-bg: #3a1c21;
+    --bg: #131312; --bg-1: #1f1f1c; --card: #1a1a18;
+    --fg: #ebebe3; --fg-1: #c2c2b8; --fg-2: #8e8e85; --fg-3: #62625b;
+    --rule: #302f2b; --rule-strong: #55554d;
+    --accent: #d0a077;
+    --major: #f0a58a; --interesting: #9bd0ad; --maintenance: #8e8e85;
+    --breaking: #f2929c;
   }
 }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0; padding: 0 1rem 4rem; background: var(--bg); color: var(--fg);
-  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  margin: 0; padding: 0 1.25rem 4rem; background: var(--bg); color: var(--fg);
+  font-family: var(--mono); font-size: 14px; line-height: 1.55;
+  font-variant-ligatures: none; -webkit-font-smoothing: antialiased;
 }
-main { max-width: 52rem; margin: 0 auto; }
-a { color: var(--accent); }
+main { max-width: 54rem; margin: 0 auto; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code { font-family: inherit; background: var(--bg-1); padding: .05rem .3rem; color: var(--fg-1); }
+::selection { background: var(--fg); color: var(--bg); }
+:focus-visible { outline: 1px dashed var(--fg); outline-offset: 2px; }
+
+/* Micro-label: the uppercase 11px/.08em run that carries every piece of
+   secondary chrome — counts, column heads, day markers, the footer. */
+.label {
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--fg-2);
+}
+.label a { color: var(--fg-2); text-decoration: none; border-bottom: 1px dashed var(--rule-strong); }
+.label a:hover { color: var(--fg); border-bottom-color: var(--fg); }
+.label [data-count], .label strong { color: var(--fg); font-weight: 700; }
+.meta { color: var(--fg-2); font-size: 12px; }
+
+/* Masthead: wordmark, a rule that eats the slack, then the tallies. */
 header.top {
-  display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline;
-  justify-content: space-between; padding: 1.5rem 0 1rem;
-  border-bottom: 1px solid var(--line); margin-bottom: 1.25rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .85rem;
+  padding: 1.75rem 0 0; margin-bottom: 1.5rem;
 }
-header.top h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
-header.top h1 a { color: inherit; text-decoration: none; }
-.meta { color: var(--muted); font-size: .85rem; }
-nav.filters { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.25rem; }
-nav.filters a {
-  padding: .2rem .6rem; border: 1px solid var(--line); border-radius: 999px;
-  text-decoration: none; font-size: .82rem; color: var(--muted); background: var(--card);
+header.top h1 {
+  margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase;
 }
-nav.filters a.on { color: var(--fg); border-color: var(--accent); }
+header.top h1 a { color: var(--fg); text-decoration: none; }
+header.top h1 a:hover { color: var(--accent); }
+.rule { flex: 1 1 3rem; border-top: 1px dashed var(--rule); height: 0; }
+
+h2.page { font-size: 17px; font-weight: 700; letter-spacing: .02em; margin: 0 0 .35rem; }
+h2.section {
+  font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--fg-2); border-bottom: 1px dashed var(--rule);
+  padding-bottom: .4rem; margin: 0 0 1rem;
+}
+
+/* Chip group: one outer border with dividers between, active chip inverted. */
+nav.filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
+  margin: 1.25rem 0;
+}
+.chips { display: flex; border: 1px solid var(--rule-strong); }
+.chips a {
+  padding: .3rem .7rem; font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-2); text-decoration: none;
+  white-space: nowrap; border-right: 1px solid var(--rule-strong);
+}
+.chips a:last-child { border-right: 0; }
+.chips a:hover { color: var(--fg); background: var(--bg-1); }
+.chips a.on { background: var(--fg); color: var(--bg); }
+.chips a:focus-visible { outline-offset: -3px; }
+
+/* Day marker. Releases arrive in a stream; this is what gives it structure. */
+section.day > h2 {
+  display: flex; align-items: center; gap: .7rem;
+  margin: 1.6rem 0 .7rem; font-size: 11px; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--fg-2);
+}
+section.day > h2::before { content: "\\2500\\2500"; color: var(--fg-3); letter-spacing: 0; }
+section.day > h2::after { content: ""; flex: 1; border-top: 1px dashed var(--rule); }
+section.day:first-of-type > h2 { margin-top: .5rem; }
+
+/* The left rail is the verdict, readable in peripheral vision down the page. */
 article.release {
-  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: .9rem 1rem; margin-bottom: .7rem;
+  background: var(--card); border: 1px solid var(--rule);
+  border-left: 2px solid var(--fg-3);
+  padding: .7rem .9rem .75rem; margin-bottom: .5rem;
+  transition: opacity .18s ease, transform .18s ease;
 }
-article.release.dismissed { opacity: .55; }
-/* The fetch path removes a card in place; this keeps that from being a jump cut.
-   Height is animated too, so the cards below slide up rather than snap. */
-article.release { transition: opacity .18s ease, transform .18s ease; }
-article.release.leaving {
-  opacity: 0; transform: translateX(-8px); pointer-events: none;
-}
+article.release[data-verdict="major"] { border-left-color: var(--major); }
+article.release[data-verdict="interesting"] { border-left-color: var(--interesting); }
+article.release[data-verdict="maintenance"] { border-left-color: var(--maintenance); }
+/* Breaking outranks the verdict: whatever else it is, that is the rail to see. */
+article.release[data-breaking="1"] { border-left-color: var(--breaking); }
+article.release.dismissed { opacity: .5; border-left-color: var(--rule-strong); }
+/* The fetch path removes a card in place; this keeps that from being a jump cut. */
+article.release.leaving { opacity: 0; transform: translateX(-8px); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   article.release { transition: none; }
   article.release.leaving { transform: none; }
 }
-button[data-busy] { opacity: .5; cursor: progress; }
+
 .rhead { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
-.rhead .app { font-weight: 600; }
-.rhead .tag { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: .85rem; }
-.rhead .when { margin-left: auto; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.rhead .app a { color: var(--fg); font-weight: 700; text-decoration: none; }
+.rhead .app a:hover { color: var(--accent); }
+.rhead .tag { color: var(--fg-2); }
+.rhead .tag a { color: var(--accent); text-decoration: none; }
+.rhead .tag a:hover { text-decoration: underline; }
+.rhead .when {
+  margin-left: auto; color: var(--fg-3); font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.summary { margin: .5rem 0 0; color: var(--fg-1); max-width: 74ch; }
+ul.highlights {
+  margin: .45rem 0 0; padding: 0; list-style: none;
+  color: var(--fg-2); font-size: 13px; max-width: 74ch;
+}
+ul.highlights li { position: relative; padding-left: 1.1rem; }
+ul.highlights li::before { content: "\\00b7"; position: absolute; left: .35rem; color: var(--fg-3); }
+
+/* Outline badges throughout, so that exactly one thing on a card is loud. */
 .badge {
-  font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
-  padding: .1rem .45rem; border-radius: 4px; font-weight: 600;
+  font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase;
+  padding: .1rem .4rem; border: 1px solid currentColor; line-height: 1.5;
+  white-space: nowrap;
 }
-.badge.major { color: var(--major); background: var(--major-bg); }
-.badge.interesting { color: var(--interesting); background: var(--interesting-bg); }
-.badge.maintenance { color: var(--maintenance); background: var(--maintenance-bg); }
-.badge.breaking { color: var(--breaking); background: var(--breaking-bg); }
-.badge.untriaged { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
-/* State badges. Deliberately quieter than the verdict badges: they describe
-   where a release sits, not how important it is. */
-.badge.history { color: var(--muted); background: transparent; border: 1px solid var(--line); }
-.badge.dismissed-tag { color: var(--muted); background: var(--maintenance-bg); }
-.tally strong { color: var(--fg); }
-.legend {
-  margin-top: 1.5rem; padding-top: .75rem; border-top: 1px solid var(--line);
-  color: var(--muted); font-size: .82rem; line-height: 1.5;
+.badge.major { color: var(--major); }
+.badge.interesting { color: var(--interesting); }
+.badge.maintenance { color: var(--maintenance); }
+.badge.breaking {
+  color: var(--bg); background: var(--breaking); border-color: var(--breaking);
+  font-weight: 700;
 }
-.legend strong { color: var(--fg); font-weight: 600; }
-.summary { margin: .45rem 0 0; }
-ul.highlights { margin: .45rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .9rem; }
-.actions { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; }
+.badge.untriaged { color: var(--fg-3); border-style: dashed; }
+/* State badges: where a release sits, not how important it is. */
+.badge.history { color: var(--fg-3); border-style: dashed; }
+.badge.dismissed-tag { color: var(--fg-3); }
+
+/* Buttons wear their brackets in CSS — decorative, so they stay out of the
+   accessible name. Hover inverts, which is shout.sh's whole button language. */
+.actions { display: flex; gap: .5rem; align-items: center; margin: .5rem 0 0 -.5rem; }
 form.inline { display: inline; }
 button {
-  font: inherit; font-size: .82rem; padding: .18rem .6rem; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 6px;
-  background: var(--card); color: var(--muted);
+  font: inherit; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  padding: .15rem .5rem; cursor: pointer; border: 0; background: transparent;
+  color: var(--fg-2);
 }
-button:hover { color: var(--fg); border-color: var(--accent); }
-button.danger:hover { color: var(--breaking); border-color: var(--breaking); }
-.empty { color: var(--muted); padding: 2.5rem 0; text-align: center; }
-table.roster { width: 100%; border-collapse: collapse; font-size: .9rem; }
-table.roster th { text-align: left; color: var(--muted); font-weight: 500; }
-table.roster th, table.roster td { padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
-form.add { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+button::before { content: "["; color: var(--fg-3); margin-right: .35rem; }
+button::after { content: "]"; color: var(--fg-3); margin-left: .35rem; }
+button:hover, button:hover::before, button:hover::after { color: var(--bg); }
+button:hover { background: var(--fg); }
+button.danger:hover { background: var(--breaking); }
+button:focus-visible { outline-offset: -1px; }
+button[data-busy] { opacity: .5; cursor: progress; }
+
+.empty {
+  border: 1px dashed var(--rule); padding: 2.75rem 1rem; margin: .5rem 0;
+  text-align: center;
+}
+.empty b {
+  display: block; color: var(--fg); font-weight: 700; font-size: 12px;
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.empty span { display: block; margin-top: .4rem; color: var(--fg-2); font-size: 12px; }
+
+.legend {
+  margin-top: 1.75rem; padding-top: .8rem; border-top: 1px dashed var(--rule);
+  color: var(--fg-2); font-size: 12px; max-width: 74ch;
+}
+.legend strong { color: var(--fg); font-weight: 700; }
+
+table.roster { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.roster th {
+  text-align: left; font-size: 11px; font-weight: 500; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-2);
+  border-bottom: 1px solid var(--rule-strong);
+}
+table.roster th, table.roster td { padding: .45rem .6rem; }
+table.roster td { border-bottom: 1px dashed var(--rule); }
+table.roster tbody tr:hover td { background: var(--bg-1); }
+table.roster th:first-child, table.roster td:first-child { padding-left: 0; }
+table.roster th:last-child, table.roster td:last-child { padding-right: 0; text-align: right; }
+table.roster td a { color: var(--fg); text-decoration: none; font-weight: 700; }
+table.roster td a:hover { color: var(--accent); }
+table.roster .off { color: var(--fg-3); }
+
+form.add { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 0 0 1.5rem; }
 form.add input, form.add select {
-  font: inherit; font-size: .85rem; padding: .3rem .5rem;
-  border: 1px solid var(--line); border-radius: 6px;
-  background: var(--card); color: var(--fg);
+  font: inherit; font-size: 13px; padding: .3rem .5rem; border-radius: 0;
+  border: 1px solid var(--rule-strong); background: var(--bg-1); color: var(--fg);
 }
-form.add input[name="ref"] { flex: 1 1 18rem; }
-footer.foot { margin-top: 2.5rem; color: var(--muted); font-size: .8rem; }
+form.add input::placeholder { color: var(--fg-3); }
+form.add input:focus-visible, form.add select:focus-visible { outline-offset: -3px; }
+form.add input[name="ref"] { flex: 1 1 20rem; }
+
+footer.foot {
+  margin-top: 3rem; border-top: 1px dashed var(--rule); padding-top: .9rem;
+  color: var(--fg-3); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* A wrapped chip row strands rows without top/bottom borders, so below this
+   width each chip carries its own box instead (shout.sh solves it the same way).
+   Form controls go to 16px to block iOS focus-zoom. */
+@media (max-width: 640px) {
+  body { padding: 0 .85rem 3rem; }
+  .chips { flex-wrap: wrap; gap: 5px; border: 0; }
+  .chips a { border: 1px solid var(--rule-strong); padding: .35rem .6rem; }
+  .chips a:last-child { border-right: 1px solid var(--rule-strong); }
+  header.top .rule { display: none; }
+  form.add input, form.add select { font-size: 16px; flex: 1 1 100%; }
+  .rhead .when { margin-left: 0; }
+}
 `;
 
 /**
@@ -219,7 +352,10 @@ const SCRIPT = `
       // card goes, or the page just looks broken.
       card.classList.add("leaving");
       window.setTimeout(function () {
+        var day = card.closest("section.day");
         card.remove();
+        // A day marker with nothing under it is worse than no marker at all.
+        if (day && !day.querySelector("article.release")) day.remove();
         if (!document.querySelector("article.release")) window.location.reload();
       }, 180);
     }
@@ -297,6 +433,31 @@ export function layout({ title, body, showsDismissed }: LayoutOptions): string {
 <script>${SCRIPT}</script>
 </body>
 </html>`;
+}
+
+// Day bucketing for the release stream. The service already has one timezone
+// (config's TZ, what the digest cron runs on), so "today" means today there —
+// not in UTC, which would roll the marker over at the wrong hour for eight
+// months of the year.
+const dayFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** `YYYY-MM-DD` in the service timezone — the grouping key, and its own label. */
+export function dayKey(iso: string | null, fallback: string): string {
+  const ms = Date.parse(iso ?? fallback);
+  return Number.isNaN(ms) ? "" : dayFormat.format(new Date(ms));
+}
+
+/** "today" / "yesterday" while that's still the useful frame, ISO after. */
+export function dayLabel(key: string, now = Date.now()): string {
+  if (key === "") return "undated";
+  if (key === dayFormat.format(new Date(now))) return "today";
+  if (key === dayFormat.format(new Date(now - 86_400_000))) return "yesterday";
+  return key;
 }
 
 /** "3 hours ago" — relative where it helps, absolute once it doesn't. */

@@ -134,8 +134,9 @@ describe("renderDigest", () => {
       release({ verdict: "interesting", app_name: "Interesting" }),
     ]);
 
-    const order = ["Major", "Interesting", "Maintenance", "Not triaged"].map((label) =>
-      digest.html.indexOf(`>${label}</h2>`),
+    // Section headings carry their own count: "MAJOR · 1".
+    const order = ["MAJOR", "INTERESTING", "MAINTENANCE", "NOT TRIAGED"].map((label) =>
+      digest.html.indexOf(`>${label} &middot;`),
     );
     expect(order.every((i) => i > 0)).toBe(true);
     expect(order).toEqual(order.toSorted((a, b) => a - b));
@@ -151,7 +152,8 @@ describe("renderDigest", () => {
     const digest = renderDigest([
       release({ breaking: true, highlights: ["First", "Second"] }),
     ]);
-    expect(digest.html).toContain("breaking");
+    // Uppercased in the string, not by text-transform — see render.ts.
+    expect(digest.html).toContain("BREAKING");
     expect(digest.html).toContain("First");
     expect(digest.html).toContain("Second");
   });
@@ -229,7 +231,9 @@ describe("renderDigest", () => {
         release({ verdict: "maintenance", app_name: "DropMe" }),
         release({ verdict: "major", app_name: "KeepMe" }),
       ],
-      { maxHtmlBytes: 2_000 },
+      // Budgeted to fit the shell plus exactly one card, so the drop is forced
+      // and the survivor is the one the ordering is supposed to protect.
+      { maxHtmlBytes: 2_400 },
     );
     if (digest.truncated > 0) {
       expect(digest.html).toContain("KeepMe");

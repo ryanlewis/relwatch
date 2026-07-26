@@ -149,6 +149,47 @@ function buildMessage(
   return lines.join("\n");
 }
 
+// The digest carries the dashboard's visual system (src/web/html.ts): one mono
+// face, square corners, dashed rules, uppercase tracked section labels, and a
+// verdict-coloured left rail on each card.
+//
+// Two deliberate differences, both forced by email:
+//
+//   - It stays on paper. The dashboard's dark variant would be re-inverted by
+//     Gmail's dark-mode filter and ignored outright by Outlook's Word engine,
+//     which is how a "dark theme" email ends up as grey-on-grey.
+//   - Labels are uppercased in the string rather than by `text-transform`,
+//     which Outlook on Windows does not implement.
+const C = {
+  bg: "#fbfbfa",
+  card: "#ffffff",
+  fg: "#1a1a18",
+  fg1: "#45453d",
+  fg2: "#6b6b64",
+  fg3: "#9c9c92",
+  rule: "#d9d9d0",
+  ruleStrong: "#b0b0a5",
+  accent: "#7a4b2a",
+  major: "#8f3a1f",
+  interesting: "#2f5d3f",
+  maintenance: "#6b6b64",
+  breaking: "#a11b2b",
+} as const;
+
+// Short on purpose: this stack is repeated on every text element (mail clients
+// cannot be trusted to inherit font-family), so each character is paid for once
+// per release against Hubbub's byte cap.
+const MONO = "Menlo,Consolas,monospace";
+
+/** The rail colour is the verdict; breaking outranks it, as on the dashboard. */
+function rail(r: ReleaseWithApp): string {
+  if (r.breaking) return C.breaking;
+  if (r.verdict === "major") return C.major;
+  if (r.verdict === "interesting") return C.interesting;
+  if (r.verdict === "maintenance") return C.maintenance;
+  return C.fg3;
+}
+
 function buildHtml(
   releases: readonly ReleaseWithApp[],
   date: string,
@@ -159,10 +200,9 @@ function buildHtml(
   const sections = GROUPS.filter(({ key }) => (grouped.get(key) ?? []).length > 0)
     .map(({ key, label }) => {
       const items = (grouped.get(key) ?? []).map(renderRelease).join("\n");
+      const n = (grouped.get(key) ?? []).length;
       return `
-      <h2 style="font:600 13px/1.4 -apple-system,Segoe UI,sans-serif;text-transform:uppercase;
-                 letter-spacing:.06em;color:#6b6b64;margin:26px 0 10px;
-                 border-bottom:1px solid #e3e3dd;padding-bottom:5px;">${h(label)}</h2>
+      <h2 style="font:500 11px/1.4 ${MONO};letter-spacing:.08em;color:${C.fg2};margin:26px 0 10px;border-bottom:1px dashed ${C.rule};padding-bottom:6px;">${h(label.toUpperCase())} &middot; ${n}</h2>
       ${items}`;
     })
     .join("\n");
@@ -170,25 +210,26 @@ function buildHtml(
   // Truncation is stated in the body, not just implied by a short list.
   const footer =
     truncated > 0
-      ? `<p style="font:13px/1.5 -apple-system,Segoe UI,sans-serif;color:#a11b2b;margin:22px 0 0;">
+      ? `<p style="font:13px/1.5 ${MONO};color:${C.breaking};margin:22px 0 0;
+                   border-left:2px solid ${C.breaking};padding-left:10px;">
            ${truncated} further release${truncated === 1 ? "" : "s"} not shown — the digest hit its size limit.
-           See the <a href="https://relwatch.example.com" style="color:#a11b2b;">dashboard</a> for the rest.
+           See the <a href="https://relwatch.example.com" style="color:${C.breaking};">dashboard</a> for the rest.
          </p>`
       : "";
 
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>relwatch ${h(date)}</title></head>
-<body style="margin:0;padding:22px 16px;background:#fbfbfa;">
+<body style="margin:0;padding:24px 16px;background:${C.bg};">
 <div style="max-width:640px;margin:0 auto;">
-  <h1 style="font:600 19px/1.3 -apple-system,Segoe UI,sans-serif;color:#1a1a18;margin:0 0 4px;">
-    Release digest
-  </h1>
-  <p style="font:13px/1.4 -apple-system,Segoe UI,sans-serif;color:#6b6b64;margin:0;">${h(date)}</p>
+  <div style="border-bottom:1px solid ${C.ruleStrong};padding-bottom:8px;">
+    <span style="font:700 15px/1.4 ${MONO};letter-spacing:.16em;color:${C.fg};">RELWATCH</span>
+    <span style="font:400 11px/1.4 ${MONO};letter-spacing:.08em;color:${C.fg2};">&nbsp;&middot;&nbsp;${h(date)}</span>
+  </div>
   ${sections}
   ${footer}
-  <p style="font:12px/1.5 -apple-system,Segoe UI,sans-serif;color:#6b6b64;margin:28px 0 0;
-            border-top:1px solid #e3e3dd;padding-top:10px;">
-    <a href="https://relwatch.example.com" style="color:#7a4b2a;">relwatch dashboard</a>
+  <p style="font:400 11px/1.5 ${MONO};letter-spacing:.08em;color:${C.fg3};margin:30px 0 0;
+            border-top:1px dashed ${C.rule};padding-top:10px;">
+    <a href="https://relwatch.example.com" style="color:${C.fg3};">RELWATCH DASHBOARD</a>
   </p>
 </div>
 </body></html>`;
@@ -198,31 +239,39 @@ function renderRelease(r: ReleaseWithApp): string {
   const link = safeUrl(r.url);
   const title = h(r.tag ?? r.title ?? "(untitled)");
   const titleHtml = link
-    ? `<a href="${h(link)}" style="color:#7a4b2a;text-decoration:none;">${title}</a>`
+    ? `<a href="${h(link)}" style="color:${C.accent};text-decoration:none;">${title}</a>`
     : title;
 
+  // The one loud element on a card: filled, where every other badge is a rule.
   const breaking = r.breaking
-    ? `<span style="font:600 10px/1 -apple-system,Segoe UI,sans-serif;color:#a11b2b;
-         background:#fdecee;padding:2px 5px;border-radius:3px;text-transform:uppercase;
-         letter-spacing:.04em;">breaking</span>`
+    ? `<span style="font:700 10px/1.6 ${MONO};color:${C.bg};background:${C.breaking};
+         padding:1px 5px;letter-spacing:.1em;">BREAKING</span>`
     : "";
 
   const summary = r.summary
-    ? `<p style="font:14px/1.5 -apple-system,Segoe UI,sans-serif;color:#1a1a18;margin:5px 0 0;">${h(r.summary)}</p>`
-    : `<p style="font:14px/1.5 -apple-system,Segoe UI,sans-serif;color:#6b6b64;margin:5px 0 0;">Not triaged.</p>`;
+    ? `<p style="font:400 13px/1.55 ${MONO};color:${C.fg1};margin:6px 0 0;">${h(r.summary)}</p>`
+    : `<p style="font:400 13px/1.55 ${MONO};color:${C.fg3};margin:6px 0 0;">Not triaged.</p>`;
 
+  // list-style is dropped for a literal "·" — bullet rendering is one of the
+  // least consistent things across mail clients.
   const highlights =
     r.highlights.length > 0
-      ? `<ul style="font:13px/1.5 -apple-system,Segoe UI,sans-serif;color:#6b6b64;margin:6px 0 0;padding-left:18px;">
-           ${r.highlights.map((item) => `<li>${h(item)}</li>`).join("")}
+      ? `<ul style="font:400 12px/1.55 ${MONO};color:${C.fg2};margin:6px 0 0;padding:0;list-style:none;">
+           ${r.highlights
+             .map(
+               (item) =>
+                 `<li style="margin:1px 0;"><span style="color:${C.fg3};">&middot;</span> ${h(item)}</li>`,
+             )
+             .join("")}
          </ul>`
       : "";
 
   return `
-  <div style="background:#fff;border:1px solid #e3e3dd;border-radius:8px;padding:12px 14px;margin-bottom:9px;">
-    <div style="font:14px/1.4 -apple-system,Segoe UI,sans-serif;">
-      <strong style="color:#1a1a18;">${h(r.app_name)}</strong>
-      <span style="font-family:ui-monospace,SFMono-Regular,monospace;font-size:13px;color:#6b6b64;">${titleHtml}</span>
+  <div style="background:${C.card};border:1px solid ${C.rule};border-left:2px solid ${rail(r)};
+              padding:11px 13px 12px;margin-bottom:7px;">
+    <div style="font:400 13px/1.5 ${MONO};">
+      <strong style="color:${C.fg};font-weight:700;">${h(r.app_name)}</strong>
+      <span style="color:${C.fg2};">&nbsp;&nbsp;${titleHtml}</span>
       ${breaking}
     </div>
     ${summary}

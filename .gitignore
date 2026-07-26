@@ -5,5 +5,7 @@ node_modules/
 *.db-shm
 *.log
 roster.json
+# Regenerated on every `bun test`; the .tmp shards in particular are churn.
+coverage/
 .claude/settings.local.json
 relwatch

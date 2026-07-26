@@ -3,7 +3,16 @@
 // dismissal hides and never deletes (DESIGN §5.1).
 import type { App, ReleaseWithApp, Verdict } from "../db.js";
 import { url } from "./auth.js";
-import { h, html, layout, safeUrl, timeAgo, type SafeHtml } from "./html.js";
+import {
+  dayKey,
+  dayLabel,
+  h,
+  html,
+  layout,
+  safeUrl,
+  timeAgo,
+  type SafeHtml,
+} from "./html.js";
 
 const VERDICTS: Verdict[] = ["major", "interesting", "maintenance"];
 
@@ -26,10 +35,13 @@ export function renderInbox(view: InboxView): string {
     ${header(view.counts, isAdmin)}
     ${filters(verdict, all)}
     ${releases.length === 0
-      ? html`<p class="empty">
-          ${all ? "Nothing here yet." : "Inbox zero — nothing undismissed."}
-        </p>`
-      : releases.map((r) => releaseCard(r, isAdmin, view.now))}
+      ? empty(
+          all ? "Nothing here yet" : "Inbox zero",
+          all ? "No releases match this filter." : "Nothing undismissed.",
+        )
+      : byDay(releases).map(({ key, items }) =>
+          daySection(key, items, isAdmin, view.now),
+        )}
     ${isAdmin && releases.length > 0 && !all
       ? html`<form
           class="inline"
@@ -74,21 +86,23 @@ export function renderApp(view: AppView): string {
 
   const body = html`
     ${header(view.counts, isAdmin)}
-    <h2>
+    <h2 class="page">
       ${app.name}${app.active ? "" : html` <span class="badge untriaged">removed</span>`}
     </h2>
     <p class="meta">
       ${app.kind} · <code>${app.ref}</code>${home ? html` · <a href="${home}">homepage</a>` : ""}
     </p>
-    <p class="meta tally">
+    <p class="label tally">
       ${releases.length} release${releases.length === 1 ? "" : "s"} ·
       <strong data-count="app-inbox">${inbox.length}</strong> in inbox ·
       <span data-count="app-dismissed">${dismissed}</span> dismissed ·
       ${history} history
     </p>
     <nav class="filters">
-      ${filterLink("Show all", appUrl, hideDismissed !== true)}
-      ${filterLink("Inbox only", `${appUrl}?hide=1`, hideDismissed === true)}
+      <span class="chips">
+        ${filterLink("Show all", appUrl, hideDismissed !== true)}
+        ${filterLink("Inbox only", `${appUrl}?hide=1`, hideDismissed === true)}
+      </span>
       ${isAdmin && inbox.length > 0
         ? html`<form
             class="inline"
@@ -103,12 +117,12 @@ export function renderApp(view: AppView): string {
         : ""}
     </nav>
     ${shown.length === 0
-      ? html`<p class="empty">
-          ${releases.length === 0
-            ? "No releases recorded yet."
-            : "Nothing left in the inbox for this app."}
-        </p>`
-      : shown.map((r) => releaseCard(r, isAdmin, view.now, { showApp: false }))}
+      ? releases.length === 0
+        ? empty("No releases", "Nothing recorded for this app yet.")
+        : empty("Inbox zero", "Nothing left in the inbox for this app.")
+      : byDay(shown).map(({ key, items }) =>
+          daySection(key, items, isAdmin, view.now, { showApp: false }),
+        )}
     ${history > 0
       ? html`<p class="legend">
           <strong>history</strong> — seen during the first poll of this app, so it is
@@ -133,7 +147,7 @@ export function renderRoster(view: RosterView): string {
 
   const body = html`
     ${header(view.counts, isAdmin)}
-    <h2>Roster</h2>
+    <h2 class="section">Roster · ${apps.length} tracked</h2>
     ${isAdmin
       ? html`<form class="add" method="post" action="${url("/api/apps")}">
           <select name="kind">
@@ -147,16 +161,16 @@ export function renderRoster(view: RosterView): string {
       : ""}
     <table class="roster">
       <thead>
-        <tr><th>Name</th><th>Kind</th><th>Reference</th><th>Releases</th>${isAdmin ? html`<th></th>` : ""}</tr>
+        <tr><th>Name</th><th>Kind</th><th>Reference</th><th>State</th>${isAdmin ? html`<th></th>` : ""}</tr>
       </thead>
       <tbody>
         ${apps.map(
           (app) => html`
             <tr>
               <td><a href="${url(`/app/${app.id}`)}">${app.name}</a></td>
-              <td>${app.kind}</td>
+              <td class="off">${app.kind}</td>
               <td><code>${app.ref}</code></td>
-              <td>${app.active ? "active" : "removed"}</td>
+              <td class="${app.active ? "" : "off"}">${app.active ? "active" : "removed"}</td>
               ${isAdmin
                 ? html`<td>
                     ${app.active
@@ -188,8 +202,9 @@ function header(counts: InboxView["counts"], isAdmin: boolean): SafeHtml {
   return html`
     <header class="top">
       <h1><a href="${url("/")}">relwatch</a></h1>
-      <span class="meta">
-        <span data-count="inbox">${counts.inbox}</span> in inbox · ${counts.apps} apps ·
+      <span class="rule"></span>
+      <span class="label">
+        <span data-count="inbox">${counts.inbox}</span> unread · ${counts.apps} apps ·
         <a href="${url("/roster")}">roster</a>
         ${isAdmin ? "" : html` · <a href="/__exe.dev/login">sign in</a>`}
       </span>
@@ -201,18 +216,59 @@ function filterLink(label: string, href: string, on: boolean): SafeHtml {
   return html`<a class="${on ? "on" : ""}" href="${href}">${label}</a>`;
 }
 
+/**
+ * Two chip groups, not one. Verdict and dismissed-or-not are independent axes,
+ * and running them together in a single strip reads as a single choice.
+ */
 function filters(verdict: Verdict | undefined, all: boolean): SafeHtml {
   const link = filterLink;
   const base = all ? `${url("/")}?all=1` : url("/");
   const withVerdict = (v: Verdict) => `${base}${all ? "&" : "?"}verdict=${v}`;
+  const suffix = verdict === undefined ? "" : `verdict=${verdict}`;
 
   return html`
     <nav class="filters">
-      ${link("All verdicts", base, verdict === undefined)}
-      ${VERDICTS.map((v) => link(v, withVerdict(v), verdict === v))}
-      ${link(all ? "Hide dismissed" : "Show dismissed", all ? url("/") : `${url("/")}?all=1`, all)}
+      <span class="chips">
+        ${link("All", base, verdict === undefined)}
+        ${VERDICTS.map((v) => link(v, withVerdict(v), verdict === v))}
+      </span>
+      <span class="chips">
+        ${link("Inbox", suffix ? `${url("/")}?${suffix}` : url("/"), !all)}
+        ${link("All time", `${url("/")}?all=1${suffix ? `&${suffix}` : ""}`, all)}
+      </span>
     </nav>
   `;
+}
+
+/** Bucket a newest-first list into contiguous days, preserving that order. */
+function byDay(releases: readonly ReleaseWithApp[]): { key: string; items: ReleaseWithApp[] }[] {
+  const groups: { key: string; items: ReleaseWithApp[] }[] = [];
+  for (const r of releases) {
+    const key = dayKey(r.published_at, r.fetched_at);
+    const last = groups.at(-1);
+    if (last && last.key === key) last.items.push(r);
+    else groups.push({ key, items: [r] });
+  }
+  return groups;
+}
+
+function daySection(
+  key: string,
+  items: readonly ReleaseWithApp[],
+  isAdmin: boolean,
+  now?: number,
+  opts: { showApp?: boolean } = {},
+): SafeHtml {
+  return html`
+    <section class="day">
+      <h2>${dayLabel(key, now)}</h2>
+      ${items.map((r) => releaseCard(r, isAdmin, now, opts))}
+    </section>
+  `;
+}
+
+function empty(headline: string, detail: string): SafeHtml {
+  return html`<p class="empty"><b>${headline}</b><span>${detail}</span></p>`;
 }
 
 function releaseCard(
@@ -226,7 +282,12 @@ function releaseCard(
   const dismissed = r.dismissed_at !== null;
 
   return html`
-    <article class="release ${dismissed ? "dismissed" : ""}" id="release-${r.id}">
+    <article
+      class="release ${dismissed ? "dismissed" : ""}"
+      id="release-${r.id}"
+      data-verdict="${r.verdict ?? ""}"
+      data-breaking="${r.breaking ? "1" : ""}"
+    >
       <div class="rhead">
         ${opts.showApp === false
           ? ""
