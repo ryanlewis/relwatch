@@ -86,6 +86,61 @@ export function normaliseDate(raw: string | null | undefined): string | null {
 }
 
 /**
+ * Repo names that say nothing about the project, because half of GitHub uses
+ * them. `httpie/cli` and `cli/cli` both reduce to "cli" otherwise, which is
+ * exactly the collision this exists to prevent.
+ */
+const GENERIC_REPO_NAMES = new Set([
+  "action",
+  "api",
+  "app",
+  "cli",
+  "client",
+  "core",
+  "desktop",
+  "docs",
+  "engine",
+  "lib",
+  "main",
+  "mobile",
+  "releases",
+  "sdk",
+  "server",
+  "tools",
+  "ui",
+  "web",
+  "www",
+]);
+
+/**
+ * A display name for an app, derived from its ref.
+ *
+ * For GitHub that is the repo name — except when the repo name is generic, in
+ * which case the owner is far more informative: `httpie/cli` is "httpie", not
+ * "cli". `cli/cli` stays "cli", because there the owner says the same thing.
+ * For a feed it is the hostname.
+ */
+export function deriveAppName(kind: "github" | "rss", ref: string): string {
+  if (kind === "github") {
+    const parts = ref
+      .replace(/\.git$/i, "")
+      .split("/")
+      .filter((segment) => segment !== "");
+    const repo = parts.at(-1);
+    const owner = parts.at(-2);
+    if (!repo) return ref;
+    if (owner && owner !== repo && GENERIC_REPO_NAMES.has(repo.toLowerCase())) return owner;
+    return repo;
+  }
+
+  try {
+    return new URL(ref).hostname.replace(/^www\./, "");
+  } catch {
+    return ref;
+  }
+}
+
+/**
  * Truncate release notes before they reach the LLM.
  *
  * Some projects paste an entire changelog into one release body. Triage only

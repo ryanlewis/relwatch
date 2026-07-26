@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AppKind } from "../src/db.js";
 import { parseRepoRef } from "../src/source/github.js";
+import { deriveAppName } from "../src/source/index.js";
 
 interface MinifluxFeed {
   title?: string;
@@ -37,12 +38,21 @@ const TOKEN_FILE =
 
 /**
  * Miniflux titles GitHub feeds "Release notes from uv"; the roster wants "uv".
- * Anything else keeps the feed's own title.
+ *
+ * GitHub names are derived from the ref rather than the title, so they follow
+ * the same rule as an app added through the dashboard — including the generic
+ * repo-name case that would otherwise make `cli/cli` and `httpie/cli` both
+ * "cli". Feeds keep their own title, which is usually the better label
+ * ("Obsidian Changelog" beats "obsidian.md").
  */
 export function cleanName(title: string | undefined, kind: AppKind, ref: string): string {
-  const stripped = title?.replace(/^Release notes from\s+/i, "").replace(/^Releases for\s+/i, "").trim();
-  if (stripped) return kind === "github" ? (stripped.split("/").pop() ?? stripped) : stripped;
-  return kind === "github" ? (ref.split("/").pop() ?? ref) : ref;
+  if (kind === "github") return deriveAppName(kind, ref);
+
+  const stripped = title
+    ?.replace(/^Release notes from\s+/i, "")
+    .replace(/^Releases for\s+/i, "")
+    .trim();
+  return stripped || deriveAppName(kind, ref);
 }
 
 /** A GitHub releases.atom URL becomes a `github` app; everything else is `rss`. */

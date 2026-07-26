@@ -229,12 +229,28 @@ describe("defaultName", () => {
     expect(defaultName("github", "cli/cli.git")).toBe("cli");
   });
 
+  test("prefers the owner when the repo name is generic", () => {
+    // `cli/cli` and `httpie/cli` both reducing to "cli" is the collision this
+    // rule exists to prevent — it was live on the real roster.
+    expect(defaultName("github", "httpie/cli")).toBe("httpie");
+    expect(defaultName("github", "cli/cli")).toBe("cli"); // owner says the same thing
+    expect(defaultName("github", "someorg/core")).toBe("someorg");
+    expect(defaultName("github", "someorg/docs")).toBe("someorg");
+    expect(defaultName("github", "someorg/API")).toBe("someorg"); // case-insensitive
+  });
+
+  test("keeps a distinctive repo name even under a well-known owner", () => {
+    expect(defaultName("github", "astral-sh/uv")).toBe("uv");
+    expect(defaultName("github", "anthropics/claude-code")).toBe("claude-code");
+  });
+
   test("uses the hostname for feeds", () => {
     expect(defaultName("rss", "https://www.obsidian.md/changelog.xml")).toBe("obsidian.md");
   });
 
   test("falls back to the raw ref when it isn't a URL", () => {
     expect(defaultName("rss", "not a url")).toBe("not a url");
+    expect(defaultName("github", "")).toBe("");
   });
 });
 

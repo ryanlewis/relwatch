@@ -5,6 +5,7 @@
 // HTML forms can't issue DELETE, so it is POST /api/apps/:id/delete.
 import type { AppKind, Store, Verdict } from "../db.js";
 import { BASE_PATH } from "../config.js";
+import { deriveAppName } from "../source/index.js";
 import { identify, requireAdmin, url } from "./auth.js";
 import { renderApp, renderInbox, renderRoster } from "./views.js";
 
@@ -275,18 +276,11 @@ async function readForm(req: Request): Promise<Map<string, string>> {
   return entries;
 }
 
-/** A sensible display name so the roster form's name field can stay optional. */
+/**
+ * A sensible display name so the roster form's name field can stay optional.
+ * Shares its rule with the roster import, so an app added through the dashboard
+ * is named the same way as one that came from Miniflux.
+ */
 export function defaultName(kind: AppKind, ref: string): string {
-  if (kind === "github") {
-    const repo = ref
-      .replace(/\.git$/, "")
-      .split("/")
-      .findLast((segment) => segment !== "");
-    return repo ?? ref;
-  }
-  try {
-    return new URL(ref).hostname.replace(/^www\./, "");
-  } catch {
-    return ref;
-  }
+  return deriveAppName(kind, ref);
 }
