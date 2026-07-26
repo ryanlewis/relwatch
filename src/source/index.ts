@@ -38,10 +38,18 @@ export interface Source {
 /** Raised for a non-2xx, so the poller can log status without parsing a string. */
 export class SourceError extends Error {
   readonly status: number | undefined;
-  constructor(message: string, status?: number) {
+  /**
+   * Distinguishes "this app is broken" from "the whole cycle is blocked".
+   * A rate limit will hit every remaining app identically, so the poller stops
+   * rather than spending 37 more requests learning the same thing.
+   */
+  readonly rateLimited: boolean;
+
+  constructor(message: string, status?: number, rateLimited = false) {
     super(message);
     this.name = "SourceError";
     this.status = status;
+    this.rateLimited = rateLimited;
   }
 }
 

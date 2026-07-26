@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { getStore, Store } from "./db.js";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getStore, SCHEMA_VERSION, Store } from "./db.js";
 
 function freshStore(): Store {
   return new Store(":memory:");
@@ -12,12 +15,39 @@ function seedApp(s: Store, ref = "owner/repo") {
 describe("migrations", () => {
   test("bring a blank DB to the current version and are idempotent", () => {
     const s = freshStore();
-    const version = () =>
-      s.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version;
-    expect(version()).toBe(1);
+    const version = s.db
+      .query<{ user_version: number }, []>("PRAGMA user_version")
+      .get()?.user_version;
+    expect(version).toBe(SCHEMA_VERSION);
     // Re-running the migrator must be a no-op, not a second CREATE TABLE.
     expect(() => new Store(":memory:")).not.toThrow();
     s.close();
+  });
+
+  test("step a v1 database up to v2 without losing its data", () => {
+    // The deployed case: a DB created before the seed watermark existed must
+    // migrate forward in place, not be recreated.
+    const path = join(tmpdir(), `relwatch-migrate-${process.pid}.db`);
+    rmSync(path, { force: true });
+
+    const original = new Store(path);
+    const app = seedApp(original);
+    original.insertRelease({ app_id: app.id, ext_id: "r1", tag: "v1" });
+    // Wind it back to the v1 shape.
+    original.db.exec("ALTER TABLE apps DROP COLUMN seeded_at");
+    original.db.exec("PRAGMA user_version = 1");
+    original.close();
+
+    const upgraded = new Store(path);
+    expect(
+      upgraded.db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version,
+    ).toBe(SCHEMA_VERSION);
+    expect(upgraded.counts()).toMatchObject({ apps: 1, releases: 1 });
+    // The new column exists and defaults to "never seeded", so the watermark
+    // logic treats pre-existing releases as news rather than silently as history.
+    expect(upgraded.listApps()[0]?.seeded_at).toBeNull();
+    upgraded.close();
+    rmSync(path, { force: true });
   });
 });
 

@@ -20,6 +20,11 @@ export interface App {
   etag: string | null;
   active: boolean;
   added_at: string;
+  /**
+   * When this app was first successfully polled. Releases published before it
+   * are history, not news — see migration v2.
+   */
+  seeded_at: string | null;
 }
 
 export interface Release {
@@ -95,6 +100,7 @@ interface AppRow {
   etag: string | null;
   active: number;
   added_at: string;
+  seeded_at: string | null;
 }
 
 interface ReleaseRow {
@@ -188,7 +194,21 @@ const MIGRATIONS: readonly string[] = [
     ON releases (id)
     WHERE triaged_at IS NULL AND backfilled = 0;
   `,
+  // v2 — the seed watermark.
+  //
+  // Without it, a first poll after backfill treats everything the backfill's
+  // shallower page missed as *news* and emails it. Observed on the real
+  // roster: backfill took 5 per app, the next poll's 10-per-page found 5 more
+  // each, and 110 historical releases queued themselves for the first digest —
+  // recreating precisely the backlog this project exists to avoid.
+  //
+  // Anything published before an app was seeded is history, however late we
+  // happen to see it (DESIGN §6.1.3).
+  `ALTER TABLE apps ADD COLUMN seeded_at TEXT;`,
 ];
+
+/** The version a freshly-migrated DB lands on. */
+export const SCHEMA_VERSION = MIGRATIONS.length;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -327,6 +347,14 @@ export class Store {
   /** Persist the ETag from a 200 so the next poll can send If-None-Match. */
   setEtag(appId: number, etag: string | null): void {
     this.db.run("UPDATE apps SET etag = ? WHERE id = ?", [etag, appId]);
+  }
+
+  /**
+   * Stamp the seed watermark on first successful poll. Idempotent: only ever
+   * set once, so a later poll can't move the line and re-classify history.
+   */
+  markSeeded(appId: number, at = nowIso()): void {
+    this.db.run("UPDATE apps SET seeded_at = ? WHERE id = ? AND seeded_at IS NULL", [at, appId]);
   }
 
   // --- Releases ------------------------------------------------------------

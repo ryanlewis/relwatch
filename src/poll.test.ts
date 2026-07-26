@@ -184,6 +184,119 @@ describe("poll", () => {
   });
 });
 
+describe("poll — the seed watermark", () => {
+  test("stamps seeded_at on the first successful poll and never moves it", async () => {
+    const { store, app } = storeWithApp();
+    const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
+
+    expect(store.getApp(app.id)!.seeded_at).toBeNull();
+    await poll(store, registry(gh));
+    const first = store.getApp(app.id)!.seeded_at;
+    expect(first).not.toBeNull();
+
+    await poll(store, registry(gh));
+    // Moving the line later would re-classify history as news.
+    expect(store.getApp(app.id)!.seeded_at).toBe(first);
+    store.close();
+  });
+
+  test("treats a release published before seeding as history, not news", async () => {
+    const { store } = storeWithApp();
+    // Backfill takes the newest 5; the next poll's wider page reaches further
+    // back. Those extra releases are old, and must not be emailed.
+    const gh = new FakeSource("github", (_ref, opts) =>
+      opts.limit === 5
+        ? ok([{ ext_id: "new", published_at: "2026-07-26T10:00:00.000Z" }])
+        : ok([
+            { ext_id: "new", published_at: "2026-07-26T10:00:00.000Z" },
+            { ext_id: "older", published_at: "2026-01-01T00:00:00.000Z" },
+          ]),
+    );
+
+    await poll(store, registry(gh), { backfill: true });
+    const summary = await poll(store, registry(gh));
+
+    expect(summary.inserted).toBe(1);
+    expect(summary.backfilled).toBe(1);
+    expect(summary.newReleases).toEqual([]);
+    // This is the whole point: the first digest stays empty of old history.
+    expect(store.digestSet()).toEqual([]);
+    store.close();
+  });
+
+  test("a genuinely new release after seeding is news and gets emailed", async () => {
+    const { store } = storeWithApp();
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const gh = new FakeSource("github", (_ref, opts) =>
+      opts.limit === 5
+        ? ok([{ ext_id: "old", published_at: "2026-01-01T00:00:00.000Z" }])
+        : ok([
+            { ext_id: "fresh", published_at: future },
+            { ext_id: "old", published_at: "2026-01-01T00:00:00.000Z" },
+          ]),
+    );
+
+    await poll(store, registry(gh), { backfill: true });
+    const summary = await poll(store, registry(gh));
+
+    expect(summary.newReleases.map((r) => r.ext_id)).toEqual(["fresh"]);
+    expect(store.digestSet().map((r) => r.ext_id)).toEqual(["fresh"]);
+    store.close();
+  });
+
+  test("an undated release after seeding is treated as news, not silently buried", async () => {
+    const { store } = storeWithApp();
+    const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
+    await poll(store, registry(gh));
+
+    const undated = new FakeSource("github", () => ({
+      releases: [
+        { ext_id: "2", tag: "v2", title: "v2", url: null, notes: null, published_at: null },
+      ],
+      etag: null,
+      notModified: false,
+    }));
+    const summary = await poll(store, registry(undated));
+    expect(summary.newReleases).toHaveLength(1);
+    store.close();
+  });
+});
+
+describe("poll — rate limiting", () => {
+  test("abandons the cycle instead of burning a request per remaining app", async () => {
+    const store = new Store(":memory:");
+    for (const ref of ["a/a", "b/b", "c/c"]) {
+      store.upsertApp({ name: ref, kind: "github", ref });
+    }
+    const gh = new FakeSource("github", () => {
+      throw new SourceError("GitHub rate limit exhausted", 403, true);
+    });
+
+    const summary = await poll(store, registry(gh));
+
+    expect(summary.rateLimited).toBe(true);
+    // One failure, not three: every remaining app would get the same 403.
+    expect(summary.failed).toHaveLength(1);
+    expect(gh.calls).toHaveLength(1);
+    store.close();
+  });
+
+  test("an ordinary per-app failure still only skips that app", async () => {
+    const store = new Store(":memory:");
+    for (const ref of ["a/a", "b/b"]) store.upsertApp({ name: ref, kind: "github", ref });
+    const gh = new FakeSource("github", (ref) => {
+      if (ref === "a/a") throw new SourceError("GitHub 404", 404);
+      return ok([{ ext_id: "1" }]);
+    });
+
+    const summary = await poll(store, registry(gh));
+    expect(summary.rateLimited).toBe(false);
+    expect(summary.failed).toHaveLength(1);
+    expect(summary.inserted).toBe(1);
+    store.close();
+  });
+});
+
 describe("poll — backfill", () => {
   test("marks rows backfilled and keeps them off the triage worklist", async () => {
     const { store } = storeWithApp();

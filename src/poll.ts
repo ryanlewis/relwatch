@@ -7,18 +7,34 @@ import { BACKFILL_DEPTH, GITHUB_PER_PAGE } from "./config.js";
 import type { App, Release, Store } from "./db.js";
 import { GitHubSource } from "./source/github.js";
 import { RssSource } from "./source/rss.js";
-import { toNewRelease, type Source } from "./source/index.js";
+import { SourceError, toNewRelease, type Source } from "./source/index.js";
 
 export interface PollSummary {
   apps: number;
   /** Apps whose source said 304 — the cheap, common outcome. */
   notModified: number;
   inserted: number;
+  /** Of `inserted`, how many landed as history rather than news. */
+  backfilled: number;
   /** Rows already present; expected to dominate on a 200 with no new release. */
   skipped: number;
   failed: { app: string; error: string }[];
   /** Newly inserted, non-backfilled releases — the triage worklist. */
   newReleases: Release[];
+  /** True when the cycle stopped early because the source rate-limited us. */
+  rateLimited: boolean;
+}
+
+/**
+ * Was this release published before we started watching the app?
+ *
+ * Anything older than the seed watermark is history however late we see it.
+ * Without this, the first normal poll after a shallower backfill treats the
+ * releases the backfill's page didn't reach as news and emails them.
+ */
+function isPreSeed(app: App, publishedAt: string | null): boolean {
+  if (app.seeded_at === null || publishedAt === null) return false;
+  return publishedAt < app.seeded_at;
 }
 
 export interface PollOptions {
@@ -53,9 +69,11 @@ export async function poll(
     apps: apps.length,
     notModified: 0,
     inserted: 0,
+    backfilled: 0,
     skipped: 0,
     failed: [],
     newReleases: [],
+    rateLimited: false,
   };
 
   const limit = opts.backfill ? BACKFILL_DEPTH : GITHUB_PER_PAGE;
@@ -84,10 +102,12 @@ export async function poll(
       }
 
       for (const fetched of result.releases) {
-        const row = store.insertRelease(toNewRelease(app, fetched, opts.backfill === true));
+        const asHistory = opts.backfill === true || isPreSeed(app, fetched.published_at);
+        const row = store.insertRelease(toNewRelease(app, fetched, asHistory));
         if (row) {
           summary.inserted++;
-          if (!row.backfilled) summary.newReleases.push(row);
+          if (row.backfilled) summary.backfilled++;
+          else summary.newReleases.push(row);
         } else {
           summary.skipped++;
         }
@@ -97,17 +117,29 @@ export async function poll(
       // a crash mid-insert leaves us with an ETag claiming we have releases we
       // never wrote, and the next poll 304s straight past them.
       store.setEtag(app.id, result.etag);
+      store.markSeeded(app.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       summary.failed.push({ app: `${app.kind}:${app.ref}`, error: message });
       console.error(`[poll] ${app.kind}:${app.ref} failed: ${message}`);
+
+      // A rate limit is not a per-app problem — every remaining app would get
+      // the same 403. Stop the cycle rather than burning 37 more requests, and
+      // let the next scheduled run pick up where this one left off.
+      if (err instanceof SourceError && err.rateLimited) {
+        summary.rateLimited = true;
+        console.error(`[poll] rate limited — abandoning the rest of this cycle`);
+        break;
+      }
     }
   }
 
   console.log(
-    `[poll] ${summary.apps} apps: ${summary.inserted} new, ${summary.skipped} seen, ` +
+    `[poll] ${summary.apps} apps: ${summary.newReleases.length} new, ` +
+      `${summary.backfilled} history, ${summary.skipped} seen, ` +
       `${summary.notModified} unchanged, ${summary.failed.length} failed` +
-      (opts.backfill ? " (backfill)" : ""),
+      (opts.backfill ? " (backfill)" : "") +
+      (summary.rateLimited ? " [rate limited]" : ""),
   );
   return summary;
 }

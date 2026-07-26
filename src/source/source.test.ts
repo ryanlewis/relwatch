@@ -223,6 +223,40 @@ describe("GitHubSource", () => {
     if (err instanceof SourceError) expect(err.status).toBe(403);
   });
 
+  test("recognises an exhausted rate limit, which arrives as a plain 403", async () => {
+    const source = new GitHubSource();
+    stubFetch(() => ({
+      status: 403,
+      body: "{}",
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1785087308" },
+    }));
+
+    const err: unknown = await source.fetch("o/r", {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceError);
+    if (err instanceof SourceError) {
+      // Without reading the header this is indistinguishable from a private repo.
+      expect(err.rateLimited).toBe(true);
+      expect(err.message).toContain("rate limit");
+      expect(err.message).toContain("2026-07-26");
+    }
+  });
+
+  test("a 403 with quota remaining is an ordinary per-app failure", async () => {
+    const source = new GitHubSource();
+    stubFetch(() => ({ status: 403, body: "{}", headers: { "x-ratelimit-remaining": "42" } }));
+
+    const err: unknown = await source.fetch("o/r", {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceError);
+    if (err instanceof SourceError) expect(err.rateLimited).toBe(false);
+  });
+
+  test("treats a 429 as a rate limit too", async () => {
+    const source = new GitHubSource();
+    stubFetch(() => ({ status: 429, body: "{}" }));
+    const err: unknown = await source.fetch("o/r", {}).catch((e: unknown) => e);
+    expect(err instanceof SourceError && err.rateLimited).toBe(true);
+  });
+
   test("raises when the body isn't an array (an error object, say)", () => {
     stubFetch(() => ({ body: JSON.stringify({ message: "Not Found" }) }));
     expect(new GitHubSource().fetch("o/r", {})).rejects.toThrow(SourceError);

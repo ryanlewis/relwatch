@@ -98,6 +98,22 @@ export class GitHubSource implements Source {
       return { releases: [], etag: opts.etag ?? null, notModified: true };
     }
     if (!res.ok) {
+      // GitHub signals an exhausted quota as 403 (or 429) with the remaining
+      // count at zero — not as a distinct status. Without reading the header
+      // it is indistinguishable from "this repo is private".
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      const rateLimited =
+        (res.status === 403 || res.status === 429) && (remaining === "0" || remaining === null);
+
+      if (rateLimited) {
+        const reset = res.headers.get("x-ratelimit-reset");
+        const resetsAt = reset ? new Date(Number(reset) * 1000).toISOString() : "unknown";
+        throw new SourceError(
+          `GitHub rate limit exhausted (resets ${resetsAt})`,
+          res.status,
+          true,
+        );
+      }
       throw new SourceError(`GitHub ${res.status} for ${repo}`, res.status);
     }
 
