@@ -1,14 +1,16 @@
-// Entrypoint: start the HTTP server, then wire the scheduled jobs.
+// Entrypoint: open the store, start the HTTP server, wire the scheduled jobs.
 //
 // The service is long-lived under systemd (Restart=on-failure). Jobs run
 // in-process (DESIGN §3); nothing here may throw its way out of a job and take
 // the process with it.
-import { describeConfig } from "./config.js";
+import { DB_PATH, describeConfig } from "./config.js";
+import { getStore } from "./db.js";
 import { startServer } from "./web/server.js";
 
 function main(): void {
   console.log(`[main] relwatch starting — ${describeConfig()}`);
-  startServer();
+  const store = getStore(DB_PATH);
+  startServer(store);
   // M6 wires the poll and digest crons here.
 }
 
