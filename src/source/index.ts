@@ -113,23 +113,58 @@ const GENERIC_REPO_NAMES = new Set([
 ]);
 
 /**
+ * Refs whose good name simply isn't in the ref.
+ *
+ * `cli/cli` is the GitHub CLI, but nothing about "cli/cli" says so — the owner
+ * is as generic as the repo, so falling back to the owner doesn't help either.
+ * That is knowledge about the project, not a pattern, so it is curated here
+ * rather than bolted onto the heuristic. Add to this as the roster grows.
+ */
+const NAME_OVERRIDES = new Map<string, string>([["cli/cli", "github-cli"]]);
+
+/**
+ * Split a GitHub reference into path segments, tolerating the shapes that
+ * actually turn up: a bare `owner/repo`, a repo URL, and the `releases.atom`
+ * feed URLs the Miniflux roster holds.
+ *
+ * Shared with `parseRepoRef` so the add form and the poller agree on what a ref
+ * means — they diverged once, and a name derived from a URL came out as
+ * "releases.atom".
+ */
+export function repoParts(ref: string): string[] {
+  return ref
+    .trim()
+    .replace(/^https?:\/\/(?:www\.)?github\.com\//i, "")
+    .replace(/\/releases\.atom$/i, "")
+    .replace(/\/releases\/?$/i, "")
+    .replace(/\.git$/i, "")
+    .split("/")
+    .filter((segment) => segment !== "");
+}
+
+/**
  * A display name for an app, derived from its ref.
  *
- * For GitHub that is the repo name — except when the repo name is generic, in
- * which case the owner is far more informative: `httpie/cli` is "httpie", not
- * "cli". `cli/cli` stays "cli", because there the owner says the same thing.
- * For a feed it is the hostname.
+ * Three rules, in order:
+ *   1. a curated override, for refs whose name isn't recoverable from the ref;
+ *   2. the owner, when the repo name is generic — `httpie/cli` is "httpie";
+ *   3. otherwise the repo name — `astral-sh/uv` is "uv".
+ *
+ * For a feed it is the hostname. This is only ever a *default*: the name is a
+ * stored column, and an explicit one always wins.
  */
 export function deriveAppName(kind: "github" | "rss", ref: string): string {
   if (kind === "github") {
-    const parts = ref
-      .replace(/\.git$/i, "")
-      .split("/")
-      .filter((segment) => segment !== "");
+    const parts = repoParts(ref);
     const repo = parts.at(-1);
     const owner = parts.at(-2);
     if (!repo) return ref;
-    if (owner && owner !== repo && GENERIC_REPO_NAMES.has(repo.toLowerCase())) return owner;
+
+    if (owner) {
+      const override = NAME_OVERRIDES.get(`${owner}/${repo}`.toLowerCase());
+      if (override) return override;
+      if (owner !== repo && GENERIC_REPO_NAMES.has(repo.toLowerCase())) return owner;
+    }
     return repo;
   }
 

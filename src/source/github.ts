@@ -9,6 +9,7 @@ import { GITHUB_PER_PAGE, GITHUB_TOKEN_FILE, SOURCE_TIMEOUT_MS, USER_AGENT } fro
 import {
   clampNotes,
   normaliseDate,
+  repoParts,
   SourceError,
   type FetchOptions,
   type FetchResult,
@@ -56,13 +57,7 @@ export function resetGitHubTokenCache(): void {
 
 /** `owner/repo`, tolerating a full GitHub URL or a releases.atom feed URL. */
 export function parseRepoRef(ref: string): string {
-  const trimmed = ref.trim().replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
-  const withoutSuffix = trimmed
-    .replace(/\/releases\.atom$/i, "")
-    .replace(/\/releases\/?$/i, "")
-    .replace(/\.git$/i, "")
-    .replace(/^\/+|\/+$/g, "");
-  const parts = withoutSuffix.split("/");
+  const parts = repoParts(ref);
   if (parts.length < 2 || !parts[0] || !parts[1]) {
     throw new SourceError(`not an owner/repo reference: ${ref}`);
   }

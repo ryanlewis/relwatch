@@ -226,17 +226,27 @@ describe("url and stripBase", () => {
 describe("defaultName", () => {
   test("uses the repo name for GitHub apps", () => {
     expect(defaultName("github", "neovim/neovim")).toBe("neovim");
-    expect(defaultName("github", "cli/cli.git")).toBe("cli");
+    expect(defaultName("github", "sharkdp/bat.git")).toBe("bat");
   });
 
   test("prefers the owner when the repo name is generic", () => {
     // `cli/cli` and `httpie/cli` both reducing to "cli" is the collision this
     // rule exists to prevent — it was live on the real roster.
     expect(defaultName("github", "httpie/cli")).toBe("httpie");
-    expect(defaultName("github", "cli/cli")).toBe("cli"); // owner says the same thing
     expect(defaultName("github", "someorg/core")).toBe("someorg");
     expect(defaultName("github", "someorg/docs")).toBe("someorg");
     expect(defaultName("github", "someorg/API")).toBe("someorg"); // case-insensitive
+  });
+
+  test("uses a curated override where the ref carries no usable name", () => {
+    // Neither half of `cli/cli` says "GitHub", so no heuristic recovers it.
+    expect(defaultName("github", "cli/cli")).toBe("github-cli");
+    expect(defaultName("github", "CLI/CLI")).toBe("github-cli");
+    expect(defaultName("github", "https://github.com/cli/cli/releases.atom")).toBe("github-cli");
+  });
+
+  test("an override does not leak onto a same-named repo under another owner", () => {
+    expect(defaultName("github", "someoneelse/cli")).toBe("someoneelse");
   });
 
   test("keeps a distinctive repo name even under a well-known owner", () => {
@@ -813,7 +823,7 @@ describe("POST /api/apps", () => {
 
     expect(res.status).toBe(303);
     const added = store.listApps().find((a) => a.ref === "cli/cli");
-    expect(added?.name).toBe("cli"); // name defaulted from the ref
+    expect(added?.name).toBe("github-cli"); // name defaulted from the ref
     store.close();
   });
 
