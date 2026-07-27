@@ -368,11 +368,15 @@ describe("poll — backfill", () => {
     store.close();
   });
 
-  test("backfilled history is still browsable in the dashboard", async () => {
+  test("backfilled history is browsable but stays out of the inbox", async () => {
     const { store, app } = storeWithApp("o/r", { seeded: false });
     const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
     await poll(store, registry(gh), { backfill: true });
-    expect(store.listReleases()).toHaveLength(1);
+
+    // The inbox is a queue of news to acknowledge — history was never news,
+    // so it must not arrive there asking to be dismissed.
+    expect(store.listReleases()).toHaveLength(0);
+    expect(store.listReleases({ includeBackfilled: true })).toHaveLength(1);
     expect(store.listAppHistory(app.id)).toHaveLength(1);
     store.close();
   });

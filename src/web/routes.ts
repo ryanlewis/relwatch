@@ -50,7 +50,9 @@ function dismissResult(store: Store, dismissed: number, appId?: number): Respons
     body["app"] = {
       id: appId,
       total: releases.length,
-      inbox: releases.filter((r) => r.dismissed_at === null).length,
+      // Same three tallies the app page renders, and the same definitions:
+      // "inbox" is news awaiting acknowledgement, so history is not in it.
+      inbox: releases.filter((r) => r.dismissed_at === null && !r.backfilled).length,
       dismissed: releases.filter((r) => r.dismissed_at !== null).length,
       history: releases.filter((r) => r.backfilled).length,
     };
@@ -182,7 +184,10 @@ function inbox(req: Request, ctx: RouteContext, requestUrl: URL): Response {
   const appId = Number(requestUrl.searchParams.get("app")) || undefined;
 
   const releases = store.listReleases({
+    // "All" means all: dismissed rows and backfilled history alike. Both are
+    // hidden from the default view, for different reasons (see listReleases).
     includeDismissed: all,
+    includeBackfilled: all,
     ...(verdict ? { verdict } : {}),
     ...(appId ? { appId } : {}),
     limit: 300,

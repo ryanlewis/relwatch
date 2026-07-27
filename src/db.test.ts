@@ -284,6 +284,35 @@ describe("listReleases", () => {
     s.close();
   });
 
+  test("keeps backfilled history out of the inbox and shows it on request", () => {
+    const s = freshStore();
+    const app = seedApp(s);
+    s.insertRelease({ app_id: app.id, ext_id: "news" });
+    s.insertRelease({ app_id: app.id, ext_id: "old", backfilled: true });
+
+    expect(s.listReleases().map((r) => r.ext_id)).toEqual(["news"]);
+    expect(s.listReleases({ includeBackfilled: true })).toHaveLength(2);
+    s.close();
+  });
+
+  test("history discovered after a dismiss-all does not refill the inbox", () => {
+    // The live regression: dismiss-all cleared the decks, then the next poll
+    // reached deeper than the backfill had and put 60 pre-seed releases back.
+    const s = freshStore();
+    const app = seedApp(s);
+    s.insertRelease({ app_id: app.id, ext_id: "news" });
+    s.dismissAll();
+    expect(s.counts().inbox).toBe(0);
+
+    s.insertRelease({ app_id: app.id, ext_id: "found-late", backfilled: true });
+
+    expect(s.listReleases()).toHaveLength(0);
+    expect(s.counts().inbox).toBe(0);
+    // Still recorded, and still reachable where history belongs.
+    expect(s.listAppHistory(app.id)).toHaveLength(2);
+    s.close();
+  });
+
   test("orders newest first, falling back to fetched_at when unpublished", () => {
     const s = freshStore();
     const app = seedApp(s);
@@ -310,12 +339,13 @@ describe("listReleases", () => {
     s.close();
   });
 
-  test("per-app history includes dismissed releases", () => {
+  test("per-app history includes dismissed and backfilled releases", () => {
     const s = freshStore();
     const app = seedApp(s);
     const rel = s.insertRelease({ app_id: app.id, ext_id: "a" })!;
+    s.insertRelease({ app_id: app.id, ext_id: "b", backfilled: true });
     s.dismiss(rel.id);
-    expect(s.listAppHistory(app.id)).toHaveLength(1);
+    expect(s.listAppHistory(app.id)).toHaveLength(2);
     s.close();
   });
 });
@@ -333,6 +363,18 @@ describe("dismissAll", () => {
     expect(s.dismissAll()).toBe(0);
     // Nothing was deleted — the archive is intact.
     expect(s.counts().releases).toBe(2);
+    s.close();
+  });
+
+  test("leaves backfilled history alone — it was never in the inbox", () => {
+    const s = freshStore();
+    const app = seedApp(s);
+    s.insertRelease({ app_id: app.id, ext_id: "news" });
+    const old = s.insertRelease({ app_id: app.id, ext_id: "old", backfilled: true })!;
+
+    expect(s.dismissAll()).toBe(1);
+    // Untouched, so "dismissed" keeps meaning acknowledged by a human.
+    expect(s.getRelease(old.id)?.dismissed_at).toBeNull();
     s.close();
   });
 

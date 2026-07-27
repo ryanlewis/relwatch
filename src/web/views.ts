@@ -1,6 +1,6 @@
-// Dashboard views. The default is an inbox of undismissed releases; dismissed
-// ones stay browsable through per-app history and the "all" filter, because
-// dismissal hides and never deletes (DESIGN §5.1).
+// Dashboard views. The default is an inbox of news awaiting acknowledgement —
+// neither dismissed nor backfilled. Both stay browsable through per-app history
+// and the "all" filter, because nothing here ever deletes (DESIGN §5.1).
 import type { App, ReleaseWithApp, Verdict } from "../db.js";
 import { url } from "./auth.js";
 import {
@@ -37,7 +37,7 @@ export function renderInbox(view: InboxView): string {
     ${releases.length === 0
       ? empty(
           all ? "Nothing here yet" : "Inbox zero",
-          all ? "No releases match this filter." : "Nothing undismissed.",
+          all ? "No releases match this filter." : "No news waiting.",
         )
       : byDay(releases).map(({ key, items }) =>
           daySection(key, items, isAdmin, view.now),
@@ -75,10 +75,11 @@ export function renderApp(view: AppView): string {
   const home = safeUrl(app.homepage);
 
   // Two independent axes, which is why both get their own label on each card:
-  // dismissed-or-not (is it still in the inbox) and backfilled-or-not (is it
-  // history that will never be emailed).
-  const inbox = releases.filter((r) => r.dismissed_at === null);
-  const dismissed = releases.length - inbox.length;
+  // dismissed-or-not (was it acknowledged) and backfilled-or-not (is it history
+  // that will never be emailed). The inbox is what neither applies to — the
+  // tallies overlap by design, so each is counted directly rather than derived.
+  const inbox = releases.filter((r) => r.dismissed_at === null && !r.backfilled);
+  const dismissed = releases.filter((r) => r.dismissed_at !== null).length;
   const history = releases.filter((r) => r.backfilled).length;
   const shown = hideDismissed ? inbox : releases;
 
@@ -125,8 +126,8 @@ export function renderApp(view: AppView): string {
         )}
     ${history > 0
       ? html`<p class="legend">
-          <strong>history</strong> — seen during the first poll of this app, so it is
-          browsable but was never triaged and will never be emailed.
+          <strong>history</strong> — published before this app was seeded, so it stays
+          out of the inbox, was never triaged and will never be emailed.
           <strong>dismissed</strong> — acknowledged; hidden from the inbox, never deleted.
         </p>`
       : ""}

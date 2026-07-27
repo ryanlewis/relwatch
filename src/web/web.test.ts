@@ -420,7 +420,9 @@ describe("GET /app/:id", () => {
 
     const body = await (await handle(req(`/app/${appId}`), { store })).text();
     expect(body).toContain("3 releases");
-    expect(body).toContain('data-count="app-inbox">2<');
+    // Inbox counts news awaiting acknowledgement: the two history rows aren't
+    // in it, and the only real release was just dismissed.
+    expect(body).toContain('data-count="app-inbox">0<');
     expect(body).toContain('data-count="app-dismissed">1<');
     expect(body).toContain("2 history");
     store.close();
@@ -494,7 +496,7 @@ describe("dismissal — the fetch path", () => {
     );
 
     expect(await jsonBody(res)).toMatchObject({
-      app: { id: appId, total: 2, inbox: 1, dismissed: 1, history: 1 },
+      app: { id: appId, total: 2, inbox: 0, dismissed: 1, history: 1 },
     });
     store.close();
   });

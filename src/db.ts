@@ -85,6 +85,11 @@ export interface TriageResult {
 export interface InboxFilter {
   /** Undismissed only (the default inbox) vs everything (the "all" view). */
   includeDismissed?: boolean;
+  /**
+   * Include backfilled history. Off by default: the inbox is a queue of news to
+   * acknowledge, and history is not news however late we happen to find it.
+   */
+  includeBackfilled?: boolean;
   verdict?: Verdict;
   appId?: number;
   limit?: number;
@@ -205,6 +210,26 @@ const MIGRATIONS: readonly string[] = [
   // Anything published before an app was seeded is history, however late we
   // happen to see it (DESIGN §6.1.3).
   `ALTER TABLE apps ADD COLUMN seeded_at TEXT;`,
+  // v3 — history leaves the inbox.
+  //
+  // The v2 watermark stopped late-discovered history reaching the *digest*, but
+  // the inbox query filtered on dismissal alone, so history still landed there
+  // undismissed. Observed live: a dismiss-all cleared 300 rows, and the next
+  // poll put 60 back — releases going back to 2021, correctly flagged
+  // `backfilled = 1` and never emailed, but sitting in the inbox as if unread.
+  // The cause is structural, not a one-off: backfill reads BACKFILL_DEPTH (5)
+  // per app while a routine poll reads GITHUB_PER_PAGE (10), so the first poll
+  // after a backfill discovers five more per app that the backfill never saw.
+  //
+  // The inbox is a queue of news to acknowledge; `digestSet` already said so
+  // with `backfilled = 0`, and now `listReleases` agrees. Repoint the partial
+  // index to match, or it no longer covers the query it exists for.
+  `
+  DROP INDEX releases_inbox;
+  CREATE INDEX releases_inbox
+    ON releases (published_at DESC)
+    WHERE dismissed_at IS NULL AND backfilled = 0;
+  `,
 ];
 
 /** The version a freshly-migrated DB lands on. */
@@ -397,11 +422,18 @@ export class Store {
     return row ? decodeReleaseWithApp(row) : null;
   }
 
-  /** The dashboard's list view. Newest first; undismissed unless asked otherwise. */
+  /**
+   * The dashboard's list view. Newest first; news only unless asked otherwise.
+   *
+   * Two exclusions, for two different reasons: dismissed rows are hidden because
+   * they were acknowledged, backfilled rows because they were never news. Only
+   * the first is something the user did.
+   */
   listReleases(filter: InboxFilter = {}): ReleaseWithApp[] {
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (!filter.includeDismissed) clauses.push("r.dismissed_at IS NULL");
+    if (!filter.includeBackfilled) clauses.push("r.backfilled = 0");
     if (filter.verdict) {
       clauses.push("r.verdict = ?");
       params.push(filter.verdict);
@@ -424,9 +456,17 @@ export class Store {
       .map(decodeReleaseWithApp);
   }
 
-  /** Per-app history — includes dismissed rows by design (DESIGN §5.1). */
+  /**
+   * Per-app history — everything, dismissed and backfilled included, because
+   * this page is where the archive is meant to be browsable (DESIGN §5.1).
+   */
   listAppHistory(appId: number, limit = 200): ReleaseWithApp[] {
-    return this.listReleases({ appId, includeDismissed: true, limit });
+    return this.listReleases({
+      appId,
+      includeDismissed: true,
+      includeBackfilled: true,
+      limit,
+    });
   }
 
   /**
@@ -501,15 +541,22 @@ export class Store {
    * The clear-the-decks button. Returns how many rows it actually hid.
    * Scoped to one app when `appId` is given — clearing a single noisy project
    * shouldn't mean clearing everything else with it.
+   *
+   * Backfilled rows are left alone: they aren't in the inbox, so the button's
+   * count would over-report, and stamping `dismissed_at` on a release that was
+   * never shown would make "dismissed" mean something other than acknowledged.
    */
   dismissAll(appId?: number): number {
     const stamp = nowIso();
     if (appId === undefined) {
-      return this.db.run("UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL", [stamp])
-        .changes;
+      return this.db.run(
+        "UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL AND backfilled = 0",
+        [stamp],
+      ).changes;
     }
     return this.db.run(
-      "UPDATE releases SET dismissed_at = ? WHERE dismissed_at IS NULL AND app_id = ?",
+      `UPDATE releases SET dismissed_at = ?
+       WHERE dismissed_at IS NULL AND backfilled = 0 AND app_id = ?`,
       [stamp, appId],
     ).changes;
   }
@@ -522,7 +569,10 @@ export class Store {
     return {
       apps: one("SELECT COUNT(*) AS n FROM apps WHERE active = 1"),
       releases: one("SELECT COUNT(*) AS n FROM releases"),
-      inbox: one("SELECT COUNT(*) AS n FROM releases WHERE dismissed_at IS NULL"),
+      // Mirrors listReleases' default, so the header tally and the list agree.
+      inbox: one(
+        "SELECT COUNT(*) AS n FROM releases WHERE dismissed_at IS NULL AND backfilled = 0",
+      ),
       pendingDigest: one(
         `SELECT COUNT(*) AS n FROM releases
          WHERE emailed_at IS NULL AND dismissed_at IS NULL AND backfilled = 0`,
