@@ -4,12 +4,26 @@ node_modules/
 *.db-wal
 *.db-shm
 *.log
+
+# The imported roster is a list of what one person watches, and the seed script
+# reads it from wherever you point it. Nothing needs it committed.
 roster.json
+
 # Regenerated on every `bun test`; the .tmp shards in particular are churn.
 coverage/
-.claude/settings.local.json
-relwatch
-# Both compile targets are deploy artifacts: 96 MB of incompressible binary
+
+# Both compile targets are deploy artifacts: ~96 MB of incompressible binary
 # that never deltas, so a checked-in copy costs the full size every build.
-# Deploy is build-then-scp; see PLAN.md M7.
+# Deploy is build-then-scp, with no commit in between.
+relwatch
 relwatch-linux
+
+# Machine-local notes and settings, kept out because this repo is public.
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Finder writes one into any directory it is asked to display, including this
+# one, so it turns up in `git status` on a machine that never opened the repo
+# deliberately. Unanchored, unlike the paths above it: the file is per
+# directory, not a build artefact at a known place.
+.DS_Store
