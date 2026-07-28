@@ -1,0 +1,85 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+
+  // JSON5 rather than JSON because this is a hand-edited operational file, and
+  // the reasoning behind a rule is worth more than the two characters the
+  // comment syntax costs.
+
+  extends: [
+    'config:recommended',
+    ':dependencyDashboard',
+
+    // Pin actions to a commit digest instead of a floating tag. A tag is a
+    // mutable pointer in someone else's repository, so `@v4` is a standing
+    // agreement to run whatever that account publishes next; a digest is not.
+    // Renovate keeps the digests current and writes the version beside them,
+    // so the readability this costs is one comment per line.
+    'helpers:pinGitHubActionDigests',
+  ],
+
+  timezone: 'Europe/London',
+
+  // Batched into Monday morning rather than arriving whenever an upstream
+  // publishes. Notifications that arrive constantly get filtered rather than
+  // read.
+  schedule: ['before 9am on monday'],
+
+  // Every PR here has to clear the `commits` job, so the subject is not
+  // Renovate's to choose freely: a conventional type, a lower-case scope, and
+  // 72 characters. 'chore(deps): ' spends 13 of them, which leaves room for
+  // every topic the rules below can generate.
+  semanticCommits: 'enabled',
+  semanticCommitType: 'chore',
+  semanticCommitScope: 'deps',
+
+  // A compromised or broken release is usually yanked within a day or two.
+  // Nothing here needs an upstream the same week it ships, so the wait costs
+  // nothing and skips the window where it would matter.
+  minimumReleaseAge: '3 days',
+
+  prConcurrentLimit: 3,
+
+  // Everything above is tuned to keep routine maintenance quiet: a weekly
+  // window, a three-day wait, one batched PR. Applied to a known-exploitable
+  // dependency those same settings become a delay of up to a week on the one
+  // update that cannot wait, so a security fix opts out of all of them and
+  // arrives immediately, alone and labelled.
+  //
+  // This reads GitHub's Dependabot alerts, which have to stay enabled on the
+  // repository for any of it to fire.
+  vulnerabilityAlerts: {
+    enabled: true,
+    schedule: null,
+    minimumReleaseAge: null,
+    groupName: null,
+    addLabels: ['security'],
+  },
+
+  packageRules: [
+    {
+      description: 'One PR a week for everything that is not a major bump. \
+Majors are excluded rather than merely unlisted, so that a breaking change \
+does not arrive inside a batch called "non-major" and get skimmed instead of \
+read.',
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      groupName: 'all non-major dependencies',
+    },
+    {
+      description: 'The AI SDK and its two provider packages move together. \
+`ai` and `@ai-sdk/*` are versioned in step and the provider seam in \
+src/triage/aisdk.ts touches all three, so splitting them across PRs produces \
+a tree that type-checks against no released combination.',
+      matchPackageNames: ['ai', '@ai-sdk/{/,}**'],
+      groupName: 'vercel ai sdk',
+    },
+    {
+      description: 'The Bun runtime pinned in .bun-version is the floor a \
+builder has to meet, not a dependency — raising it is a decision about who can \
+still build this, so it arrives alone and never grouped. CI follows on its own \
+because the workflow reads bun-version-file.',
+      matchFileNames: ['.bun-version'],
+      groupName: 'bun runtime',
+      commitMessageTopic: 'the bun runtime',
+    },
+  ],
+}
