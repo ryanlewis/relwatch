@@ -1,4 +1,4 @@
-// The digest job (DESIGN §5.2). Query, render, send, mark.
+// The digest job. Query, render, send, mark.
 import type { Store } from "../db.js";
 import { renderDigest } from "./render.js";
 import { alert, sendDigest, type SendResult } from "./send.js";
@@ -65,7 +65,7 @@ export async function runDigest(store: Store, opts: DigestOptions = {}): Promise
 
 /**
  * Watchdog: nothing ingested for 24 h means the poller is silently broken,
- * which looks exactly like a quiet week from the outside (DESIGN §5.2).
+ * which looks exactly like a quiet week from the outside.
  */
 export async function checkQuiet(
   store: Store,

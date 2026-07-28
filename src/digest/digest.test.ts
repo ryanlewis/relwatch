@@ -249,6 +249,25 @@ describe("renderDigest", () => {
 
 // --- notify ----------------------------------------------------------------
 
+describe("dashboard links", () => {
+  test("are omitted entirely when no dashboard URL is configured", () => {
+    // An email has no origin to resolve a relative link against, so an
+    // unconfigured deployment must produce no link rather than a broken one.
+    const digest = renderDigest([release()], { dashboardUrl: "" });
+
+    expect(digest.message).not.toContain("Full archive");
+    expect(digest.html).not.toContain("<a href=\"\"");
+    expect(digest.html).not.toContain("RELWATCH DASHBOARD");
+  });
+
+  test("appear in both parts when it is", () => {
+    const digest = renderDigest([release()], { dashboardUrl: "https://relwatch.example.com" });
+
+    expect(digest.message).toContain("Full archive: https://relwatch.example.com");
+    expect(digest.html).toContain('href="https://relwatch.example.com"');
+  });
+});
+
 describe("notify", () => {
   test("posts to /v1/notify with a bearer key", async () => {
     const calls = stubHubbub(() => ({ status: 202 }));
@@ -328,6 +347,18 @@ describe("notify", () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe(0);
     expect(result.error).toBeDefined();
+  });
+
+  test("says so plainly when no hub is configured", async () => {
+    const calls = stubHubbub(() => ({ status: 202 }));
+    // RW_HUBBUB_BASE has no default. Without this guard the empty base makes a
+    // relative fetch and surfaces as an opaque parse error, which reads as a
+    // network fault rather than as missing configuration.
+    const result = await notify({ title: "t", message: "m" }, { key: KEY, base: "" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("RW_HUBBUB_BASE");
+    expect(calls).toHaveLength(0);
   });
 });
 

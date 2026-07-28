@@ -5,8 +5,8 @@
 //   bun scripts/seed-roster.ts roster.json --backfill # + last N per app
 //
 // Backfilled rows are marked `backfilled = 1`: browsable as history, never
-// triaged, never emailed. That is how the dashboard opens with context without
-// the old 108-entry Miniflux backlog transferring (DESIGN §6.1).
+// triaged, never emailed. That is how the dashboard opens with context rather
+// than with a queue of things that were never news.
 import { BACKFILL_DEPTH, DB_PATH } from "../src/config.js";
 import { Store, type AppKind } from "../src/db.js";
 import { poll } from "../src/poll.js";

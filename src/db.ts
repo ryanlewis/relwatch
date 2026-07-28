@@ -1,5 +1,5 @@
-// SQLite store. This is the archive the dashboard reads, not just a delta ledger
-// (DESIGN §4.1) — so nothing here deletes a release, and dismissal only hides.
+// SQLite store. This is the archive the dashboard reads, not just a delta ledger —
+// so nothing here deletes a release, and dismissal only hides.
 //
 // Timestamps are ISO-8601 UTC strings throughout. SQLite has no date type, and
 // lexicographic ordering of that format is chronological ordering, so ORDER BY
@@ -30,7 +30,10 @@ export interface App {
 export interface Release {
   id: number;
   app_id: number;
-  /** Upstream's own id — GitHub release id, or RSS guid/link. See D1 in PLAN.md. */
+  /**
+   * Upstream's own id — GitHub release id, or RSS guid/link. Deliberately not the
+   * tag: repos re-point tags, so an edited release would masquerade as a new one.
+   */
   ext_id: string;
   tag: string | null;
   title: string | null;
@@ -141,7 +144,7 @@ interface ReleaseWithAppRow extends ReleaseRow {
 // `user_version` records how far we've got. Never edit a shipped migration —
 // append a new one, because a deployed DB has already run the old text.
 const MIGRATIONS: readonly string[] = [
-  // v1 — initial schema (DESIGN §4.1, plus ext_id per PLAN D1).
+  // v1 — initial schema.
   `
   CREATE TABLE apps (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,8 +183,8 @@ const MIGRATIONS: readonly string[] = [
     UNIQUE (app_id, ext_id)
   );
 
-  -- The digest query, exactly (DESIGN §4.1). Partial so it stays tiny: rows
-  -- leave the index for good once emailed or dismissed.
+  -- The digest query, exactly. Partial so it stays tiny: rows leave the index
+  -- for good once emailed or dismissed.
   CREATE INDEX releases_pending_digest
     ON releases (published_at)
     WHERE emailed_at IS NULL AND dismissed_at IS NULL AND backfilled = 0;
@@ -208,7 +211,7 @@ const MIGRATIONS: readonly string[] = [
   // recreating precisely the backlog this project exists to avoid.
   //
   // Anything published before an app was seeded is history, however late we
-  // happen to see it (DESIGN §6.1.3).
+  // happen to see it.
   `ALTER TABLE apps ADD COLUMN seeded_at TEXT;`,
   // v3 — history leaves the inbox.
   //
@@ -458,7 +461,7 @@ export class Store {
 
   /**
    * Per-app history — everything, dismissed and backfilled included, because
-   * this page is where the archive is meant to be browsable (DESIGN §5.1).
+   * this page is where the archive is meant to be browsable.
    */
   listAppHistory(appId: number, limit = 200): ReleaseWithApp[] {
     return this.listReleases({
@@ -470,8 +473,8 @@ export class Store {
   }
 
   /**
-   * The digest set, verbatim from DESIGN §4.1: never-emailed, undismissed, and
-   * not backfilled. Dismissing therefore suppresses a release from a digest
+   * The digest set: never-emailed, undismissed, and not backfilled.
+   * Dismissing therefore suppresses a release from a digest
    * that hasn't gone out yet, while emailing never auto-dismisses.
    */
   digestSet(): ReleaseWithApp[] {
@@ -485,7 +488,7 @@ export class Store {
       .map(decodeReleaseWithApp);
   }
 
-  /** Releases awaiting triage. Backfilled history is never triaged (DESIGN §6.1). */
+  /** Releases awaiting triage. Backfilled history is never triaged. */
   untriagedReleases(limit = 200): ReleaseWithApp[] {
     return this.db
       .query<ReleaseWithAppRow, [number]>(
@@ -510,13 +513,14 @@ export class Store {
 
   /**
    * Record a triage failure. `triaged_at` stays NULL so a later sweep can retry,
-   * but the release is never dropped — it renders untriaged (DESIGN §4.3).
+   * but the release is never dropped — it renders untriaged.
    */
   saveTriageError(id: number, message: string): void {
     this.db.run("UPDATE releases SET triage_error = ? WHERE id = ?", [message.slice(0, 500), id]);
   }
 
-  /** Marked only on a 2xx from Hubbub — see DESIGN §5.2 on never retrying. */
+  /** Marked only on a 2xx from hubbub — a send is never retried, so this is the
+   * only thing standing between a failed digest and a duplicate one. */
   markEmailed(ids: readonly number[]): number {
     if (ids.length === 0) return 0;
     const stamp = nowIso();

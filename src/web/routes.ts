@@ -1,4 +1,4 @@
-// Route table (DESIGN §5.1). Public read; every mutation gated by requireAdmin.
+// Route table. Public read; every mutation gated by requireAdmin.
 //
 // Mutations are plain form POSTs rather than fetch() calls, so the dashboard
 // needs no client JavaScript and no build step. That includes app removal:
@@ -150,8 +150,8 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
     }
   }
 
-  // DELETE is accepted alongside the form POST so the documented API shape in
-  // DESIGN §5.1 works for a curl caller.
+  // DELETE is accepted alongside the form POST so the REST-shaped route works
+  // for a curl caller.
   const deleteMatch = /^\/api\/apps\/(\d+)$/.exec(path);
   if (method === "DELETE" && deleteMatch) {
     const denied = requireAdmin(req);

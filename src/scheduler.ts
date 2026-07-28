@@ -1,4 +1,4 @@
-// In-process scheduling (DESIGN §3). Poll and digest are jobs inside the
+// In-process scheduling. Poll and digest are jobs inside the
 // service; systemd keeps the service alive, croner keeps the jobs on time.
 //
 // The invariant: a job that throws must never reach the runtime unhandled. A

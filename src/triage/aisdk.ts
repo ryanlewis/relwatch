@@ -1,9 +1,9 @@
-// Vercel AI SDK provider (DESIGN §4.4). Two tiers, one interface.
+// Vercel AI SDK provider. Two backends, one interface.
 //
-// The tiers need genuinely different call shapes, which is the whole reason the
-// seam exists: the ChatGPT-subscription tier is Responses-API-only and requires
-// store:false *and* stream:true, so it must go through streamObject; the
-// Anthropic tier is a plain generateObject. Same schema, same return type.
+// They need genuinely different call shapes, which is the whole reason the seam
+// exists: the Responses backend requires store:false *and* stream:true, so it
+// must go through streamObject; the Anthropic backend is a plain generateObject.
+// Same schema, same return type.
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, NoObjectGeneratedError, streamObject } from "ai";
@@ -51,7 +51,7 @@ export class AiSdkProvider implements Provider {
   }
 
   /**
-   * Validate/repair (DESIGN §4.3). The SDK enforces the schema on the wire, but
+   * Validate/repair. The SDK enforces the schema on the wire, but
    * adherence is a property of the model rather than the provider — a model
    * that answers in prose fails identically on both wire shapes — so a failed
    * parse gets exactly one repair attempt with its own output fed back.
@@ -110,7 +110,10 @@ const openaiGenerate: Generate = async (prompt, abortSignal) => {
   // object in ~6 s, while awaiting `.object` alone sat there until the 90 s
   // abort fired and then failed. Every triage call would have done that.
   //
-  // (DESIGN §4.4's sample shows the bare `await s.object`; it is wrong.)
+  // It fails silently, too: no error, no log line, just a pinned core, so it
+  // presents as unexplained CPU rather than as a stuck job. Do not "simplify"
+  // this loop away.
+  //
   // Partials are discarded deliberately — the dashboard has no use for a
   // half-formed triage; draining is the point.
   for await (const partial of stream.partialObjectStream) void partial;

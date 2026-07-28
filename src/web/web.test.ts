@@ -5,7 +5,8 @@ import { identify, loginUrl, requireAdmin, url } from "./auth.js";
 import { h, html, layout, raw, safeUrl, timeAgo } from "./html.js";
 import { defaultName, handle, stripBase } from "./routes.js";
 
-const ADMIN = "you@example.com";
+// Matches src/test-env.ts, which puts this address in RW_ADMIN_EMAILS.
+const ADMIN = "admin@example.com";
 
 function req(
   path: string,
@@ -156,7 +157,7 @@ describe("timeAgo", () => {
 
 describe("identify", () => {
   test("reads the proxy-injected email, case-insensitively", () => {
-    expect(identify(req("/", { email: "You@EXAMPLE.com" })).isAdmin).toBe(true);
+    expect(identify(req("/", { email: "Admin@EXAMPLE.com" })).isAdmin).toBe(true);
     expect(identify(req("/", { email: ADMIN })).email).toBe(ADMIN);
   });
 

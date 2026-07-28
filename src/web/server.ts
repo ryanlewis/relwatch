@@ -1,5 +1,5 @@
 // HTTP surface. Public read, mutations gated by the exe.dev proxy's auth
-// headers (DESIGN §5.1); the route table lives in routes.ts.
+// headers; the route table lives in routes.ts.
 import { BASE_PATH, PORT } from "../config.js";
 import type { Store } from "../db.js";
 import { handle } from "./routes.js";

@@ -1,6 +1,6 @@
 // Dashboard views. The default is an inbox of news awaiting acknowledgement —
 // neither dismissed nor backfilled. Both stay browsable through per-app history
-// and the "all" filter, because nothing here ever deletes (DESIGN §5.1).
+// and the "all" filter, because nothing here ever deletes.
 import type { App, ReleaseWithApp, Verdict } from "../db.js";
 import { url } from "./auth.js";
 import {
@@ -324,7 +324,7 @@ function releaseCard(
 
 /**
  * A release with no verdict is shown as "not triaged" rather than hidden — a
- * triage failure must never make a release disappear (DESIGN §4.3).
+ * triage failure must never make a release disappear.
  */
 function verdictBadge(r: ReleaseWithApp): SafeHtml {
   if (r.verdict === null) {

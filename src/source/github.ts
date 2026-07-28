@@ -1,7 +1,8 @@
-// GitHub Releases source — 36 of the 38 roster feeds (DESIGN §1).
+// GitHub Releases source — the common case, since most projects worth watching
+// cut releases on GitHub.
 //
-// Unauthenticated to start: 38 calls per 6-hourly cycle sits under the 60/hr
-// anonymous limit, and conditional requests that come back 304 don't count
+// Unauthenticated by default: a few dozen calls per 6-hourly cycle sits under the
+// 60/hr anonymous limit, and conditional requests that come back 304 don't count
 // against it at all. A fine-grained read-only PAT at RW_GITHUB_TOKEN_FILE drops
 // in without a code change if that ever bites.
 import { readFileSync } from "node:fs";

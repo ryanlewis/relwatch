@@ -259,8 +259,8 @@ describe("poll — the seed watermark", () => {
 
   test("an app added to the roster later starts from history, not its back catalogue", async () => {
     const store = new Store(":memory:");
-    // DESIGN §5.1 lets an app be added through the dashboard at any time. Its
-    // first poll must not treat years of releases as today's news.
+    // An app can be added through the dashboard at any time. Its first poll
+    // must not treat years of releases as today's news.
     const app = store.upsertApp({ name: "Late", kind: "github", ref: "late/app" });
     const gh = new FakeSource("github", () =>
       ok([

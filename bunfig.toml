@@ -1,4 +1,6 @@
 [test]
+# Sets the env the suite needs before config.ts reads it. See the file.
+preload = ["./src/test-env.ts"]
 coverage = true
 coverageReporter = ["text", "lcov"]
 # The goal is 90-95%+. Thresholds are enforced, so a drop fails `bun test`
@@ -8,4 +10,4 @@ coverageThreshold = { line = 0.90, function = 0.90 }
 # importing it under test would boot the service. Its logic lives in the modules
 # it calls, which are covered directly.
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["src/index.ts", "scripts/"]
+coveragePathIgnorePatterns = ["src/index.ts", "src/test-env.ts", "scripts/"]

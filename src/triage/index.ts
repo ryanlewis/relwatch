@@ -1,10 +1,10 @@
-// The provider seam (DESIGN §4.4) and the triage sweep that drives it.
+// The provider seam and the triage sweep that drives it.
 //
-// One LLM call per release, at ingest, verdict stored forever. This is what
-// replaces v1's chunk/merge/assert machinery: with no batch there are no
-// silently dropped ids, so the ~2% drop rate both Opus 5 and Haiku 4.5 showed
-// on a 108-entry batch becomes structurally impossible rather than
-// detected-and-repaired.
+// One LLM call per release, at ingest, verdict stored forever. Batching was tried
+// first and abandoned: asked to triage 108 releases in one call, both of the
+// frontier models measured dropped ~2% of the ids outright, which needs
+// chunk/merge/assert machinery to detect and repair. With no batch there are no
+// ids to drop, so the failure mode is structurally impossible instead.
 import pLimit from "p-limit";
 import { LLM_CONCURRENCY, LLM_TIMEOUT_MS, RETRY_ATTEMPTS, RETRY_BASE_DELAY_MS } from "../config.js";
 import type { ReleaseWithApp, Store } from "../db.js";

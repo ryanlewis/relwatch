@@ -1,4 +1,4 @@
-// The triage schema — single source of truth (DESIGN §4.3). Both providers
+// The triage schema — single source of truth. Both providers
 // enforce it on the wire, and the validate/repair path re-checks it, because
 // schema adherence is a property of the *model*, not the provider: glm-5p2
 // returned prose on both wire shapes during the spike.
@@ -6,7 +6,7 @@ import { z } from "zod";
 
 export const TriageSchema = z.object({
   verdict: z.enum(["major", "interesting", "maintenance"]),
-  /** One-line flavour, as the shell script produced today. */
+  /** One line of flavour — what changed, stated as a fact about the release. */
   summary: z.string(),
   breaking: z.boolean(),
   /** Up to 3 — the dashboard has room for them, the email lists them under major. */

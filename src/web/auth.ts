@@ -1,4 +1,4 @@
-// Admin auth via the exe.dev proxy (DESIGN §5.1).
+// Admin auth via the exe.dev proxy.
 //
 // The proxy injects X-ExeDev-Email / X-ExeDev-UserID for authenticated users
 // and strips any client-supplied X-ExeDev-* headers. That stripping is the

@@ -1,8 +1,9 @@
-// The poll cycle (DESIGN §4.2). Walks the active roster, fetches each app
-// through its source, inserts what's new.
+// The poll cycle. Walks the active roster, fetches each app through its source,
+// inserts what's new.
 //
 // The governing rule: a failure for one app is logged and skipped, never fatal
-// to the cycle. 37 healthy feeds must not go unpolled because one repo 404s.
+// to the cycle. A roster of healthy feeds must not go unpolled because one
+// repo 404s.
 import { BACKFILL_DEPTH, GITHUB_PER_PAGE } from "./config.js";
 import type { App, Release, Store } from "./db.js";
 import { GitHubSource } from "./source/github.js";
@@ -41,8 +42,8 @@ export interface PollOptions {
   /**
    * Backfill mode: take the last BACKFILL_DEPTH per app, mark them
    * `backfilled = 1`, and never triage or email them. This is how the dashboard
-   * opens with history without the old 108-entry backlog transferring
-   * (DESIGN §6.1).
+   * opens with context rather than with a queue — history was never news, so it
+   * is browsable without ever having been unread.
    */
   backfill?: boolean;
   /** Restrict to one app — used when the roster gains an app mid-cycle. */

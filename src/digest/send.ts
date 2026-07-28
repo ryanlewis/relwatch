@@ -1,10 +1,10 @@
-// Hubbub delivery (DESIGN §5.2), verified against the live service and the
-// contract in ~/dev/hubbub's README.
+// Delivery through hubbub (github.com/ryanlewis/hubbub), against the contract in
+// its README.
 //
-// The rule that shapes everything here: delivery is at-least-once with no
-// idempotency key, so a client retry is a duplicate digest in Ryan's inbox.
-// A timeout therefore leaves emailed_at unset and lets tomorrow's digest cover
-// it — the one failure mode that self-heals. Never retry a send.
+// The rule that shapes everything here: hubbub's delivery is at-least-once with no
+// idempotency key, so a client retry is a duplicate digest in the operator's
+// inbox. A timeout therefore leaves emailed_at unset and lets tomorrow's digest
+// cover it — the one failure mode that self-heals. Never retry a send.
 import { readFileSync } from "node:fs";
 import { DRY_RUN, HUBBUB_BASE, HUBBUB_KEY_FILE } from "../config.js";
 import type { Digest } from "./render.js";
@@ -49,6 +49,12 @@ export async function notify(
   opts: { key?: string; base?: string; signal?: AbortSignal } = {},
 ): Promise<SendResult> {
   const base = opts.base ?? HUBBUB_BASE;
+  // RW_HUBBUB_BASE has no default, so an unconfigured deployment says so plainly
+  // rather than failing later as an opaque fetch error on a relative URL.
+  if (base === "") {
+    return { ok: false, status: 0, error: "RW_HUBBUB_BASE is not set" };
+  }
+
   let key: string;
   try {
     key = opts.key ?? readHubbubKey();
@@ -145,8 +151,8 @@ export async function sendDigest(
 }
 
 /**
- * Failure alerting (DESIGN §5.2). Narrowing to ntfy keeps a broken email path
- * from swallowing the notice that the email path is broken.
+ * Failure alerting. Narrowing to ntfy keeps a broken email path from swallowing
+ * the notice that the email path is broken.
  *
  * Like `notify`, this reports failure by returning rather than throwing — it is
  * called from the failure path of a scheduled job, and an alert that throws

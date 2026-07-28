@@ -1,4 +1,4 @@
-// Server-rendered HTML (DESIGN §3: one process, no framework, no build step).
+// Server-rendered HTML: one process, no framework, no build step.
 //
 // Everything rendered here originates upstream — release titles, notes, feed
 // contents, and LLM output derived from all three. None of it is trusted, so
@@ -321,8 +321,8 @@ footer.foot {
  * and no navigation, so a dismissal doesn't cost a full page render or leave a
  * redirect sitting in the history stack for Back to land on.
  *
- * Inline and dependency-free, because "no SPA, no build step" (DESIGN §3) is a
- * property worth keeping.
+ * Inline and dependency-free, because "no SPA, no build step" is a property
+ * worth keeping.
  */
 const SCRIPT = `
 (function () {

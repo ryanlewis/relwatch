@@ -1,14 +1,14 @@
-// Digest rendering (DESIGN §5.2). Two parts from one release set:
+// Digest rendering. Two parts from one release set:
 //
-//   html    — the newsletter, transmitted verbatim by Hubbub as the
+//   html    — the newsletter, transmitted verbatim by hubbub as the
 //             multipart/alternative HTML part.
 //   message — a *summary* (counts plus the major items) under 4 KiB, not a
 //             parallel rendering of the same content.
 //
-// The renderer self-limits below Hubbub's 128 KiB cap and says so in the output
+// The renderer self-limits below hubbub's 128 KiB cap and says so in the output
 // when it does. Silent truncation is the failure mode this project exists to
 // avoid, so a dropped release is always visible in the email itself.
-import { MAX_HTML_BYTES } from "../config.js";
+import { DASHBOARD_URL, MAX_HTML_BYTES } from "../config.js";
 import type { ReleaseWithApp, Verdict } from "../db.js";
 import { h, safeUrl } from "../web/html.js";
 
@@ -68,10 +68,11 @@ export function clampBytes(s: string, max: number): string {
 
 export function renderDigest(
   releases: readonly ReleaseWithApp[],
-  opts: { maxHtmlBytes?: number; now?: Date } = {},
+  opts: { maxHtmlBytes?: number; now?: Date; dashboardUrl?: string } = {},
 ): Digest {
   const maxBytes = opts.maxHtmlBytes ?? MAX_HTML_BYTES;
   const date = (opts.now ?? new Date()).toISOString().slice(0, 10);
+  const dashboard = opts.dashboardUrl ?? DASHBOARD_URL;
 
   // Render in group order, adding releases until the budget is spent. The
   // ordering matters: if anything has to go, it should be maintenance, not a
@@ -82,7 +83,7 @@ export function renderDigest(
 
   let included = ordered;
   let truncated = 0;
-  let html = buildHtml(included, date, 0);
+  let html = buildHtml(included, date, 0, dashboard);
 
   while (included.length > 0 && byteLength(html) > maxBytes) {
     // Drop from the end — the least important group — one at a time. Digests
@@ -90,7 +91,7 @@ export function renderDigest(
     // runs; it exists so an anomalous day degrades visibly instead of failing.
     included = included.slice(0, -1);
     truncated = ordered.length - included.length;
-    html = buildHtml(included, date, truncated);
+    html = buildHtml(included, date, truncated, dashboard);
   }
 
   const counts = countByGroup(ordered);
@@ -98,7 +99,7 @@ export function renderDigest(
 
   return {
     title,
-    message: clampBytes(buildMessage(ordered, counts, truncated), MESSAGE_MAX_BYTES),
+    message: clampBytes(buildMessage(ordered, counts, truncated, dashboard), MESSAGE_MAX_BYTES),
     html,
     ids: included.map((r) => r.id),
     truncated,
@@ -126,6 +127,7 @@ function buildMessage(
   releases: readonly ReleaseWithApp[],
   counts: Map<Verdict | "untriaged", number>,
   truncated: number,
+  dashboard: string,
 ): string {
   const lines: string[] = [];
   const parts = GROUPS.filter(({ key }) => (counts.get(key) ?? 0) > 0).map(
@@ -145,7 +147,7 @@ function buildMessage(
   if (truncated > 0) {
     lines.push("", `${truncated} further release${truncated === 1 ? "" : "s"} not shown.`);
   }
-  lines.push("", "Full archive: https://relwatch.example.com");
+  if (dashboard) lines.push("", `Full archive: ${dashboard}`);
   return lines.join("\n");
 }
 
@@ -194,6 +196,7 @@ function buildHtml(
   releases: readonly ReleaseWithApp[],
   date: string,
   truncated: number,
+  dashboard: string,
 ): string {
   const grouped = group(releases);
 
@@ -213,7 +216,11 @@ function buildHtml(
       ? `<p style="font:13px/1.5 ${MONO};color:${C.breaking};margin:22px 0 0;
                    border-left:2px solid ${C.breaking};padding-left:10px;">
            ${truncated} further release${truncated === 1 ? "" : "s"} not shown — the digest hit its size limit.
-           See the <a href="https://relwatch.example.com" style="color:${C.breaking};">dashboard</a> for the rest.
+           ${
+             dashboard
+               ? `See the <a href="${h(dashboard)}" style="color:${C.breaking};">dashboard</a> for the rest.`
+               : "They are still in the dashboard."
+           }
          </p>`
       : "";
 
@@ -227,10 +234,14 @@ function buildHtml(
   </div>
   ${sections}
   ${footer}
-  <p style="font:400 11px/1.5 ${MONO};letter-spacing:.08em;color:${C.fg3};margin:30px 0 0;
+  ${
+    dashboard
+      ? `<p style="font:400 11px/1.5 ${MONO};letter-spacing:.08em;color:${C.fg3};margin:30px 0 0;
             border-top:1px dashed ${C.rule};padding-top:10px;">
-    <a href="https://relwatch.example.com" style="color:${C.fg3};">RELWATCH DASHBOARD</a>
-  </p>
+    <a href="${h(dashboard)}" style="color:${C.fg3};">RELWATCH DASHBOARD</a>
+  </p>`
+      : ""
+  }
 </div>
 </body></html>`;
 }

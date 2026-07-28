@@ -1,15 +1,18 @@
 #!/usr/bin/env bun
-// One-off: Miniflux category 6 ("Releases") → roster.json (DESIGN §6.1).
+// One-off migration: a Miniflux category of release feeds → roster.json.
 //
-// Runs on the laptop, where the Miniflux token already lives, and writes a
-// plain JSON file. The VM seeds from that file rather than reaching Miniflux
-// itself — which keeps the VM's secrets at exactly one Hubbub key (PLAN D3).
+// relwatch was built to replace an RSS reader pressed into service as release
+// infrastructure, so the first roster comes out of one. This runs wherever the
+// Miniflux token already lives and writes a plain JSON file; the deployment then
+// seeds from that file rather than reaching Miniflux itself, which keeps the
+// running service's secrets down to a single hubbub key.
 //
-//   bun scripts/import-roster.ts > roster.json
+//   MF_URL=https://miniflux.example.com MF_CAT=6 \
+//     bun scripts/import-roster.ts > roster.json
 //
 // Env:
-//   MF_URL     Miniflux base (default https://miniflux.example.com)
-//   MF_CAT     category id (default 6)
+//   MF_URL         Miniflux base URL (required)
+//   MF_CAT         category id (required)
 //   MF_TOKEN_FILE  API token path (default ~/.config/relwatch/miniflux-token)
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -31,8 +34,8 @@ export interface RosterEntry {
   homepage: string | null;
 }
 
-const MF_URL = process.env["MF_URL"] ?? "https://miniflux.example.com";
-const MF_CAT = process.env["MF_CAT"] ?? "6";
+const MF_URL = process.env["MF_URL"] ?? "";
+const MF_CAT = process.env["MF_CAT"] ?? "";
 const TOKEN_FILE =
   process.env["MF_TOKEN_FILE"] ?? join(homedir(), ".config/relwatch/miniflux-token");
 
@@ -91,6 +94,10 @@ export function toRoster(feeds: readonly MinifluxFeed[]): RosterEntry[] {
 }
 
 async function main(): Promise<void> {
+  if (!MF_URL || !MF_CAT) {
+    throw new Error("MF_URL and MF_CAT are required; see the header of this file");
+  }
+
   const token = readFileSync(TOKEN_FILE, "utf8").trim();
   if (!token) throw new Error(`empty Miniflux token at ${TOKEN_FILE}`);
 

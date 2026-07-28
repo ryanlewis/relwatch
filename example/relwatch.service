@@ -1,0 +1,60 @@
+[Unit]
+Description=relwatch — release tracker, dashboard and daily digest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relwatch
+Group=relwatch
+WorkingDirectory=/opt/relwatch
+# The compiled binary from `bun build --compile`, so the unit doesn't depend on
+# bun resolving on PATH under systemd.
+ExecStart=/opt/relwatch/relwatch
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=6
+
+Environment=NODE_ENV=production
+Environment=RW_PORT=8000
+Environment=RW_DB=/var/lib/relwatch/relwatch.db
+Environment=RW_TZ=Europe/London
+
+# Who may edit the roster and dismiss releases, matched against the identity
+# header the front proxy asserts. Unset means nobody: relwatch fails closed
+# rather than trusting whatever the header happens to say.
+Environment=RW_ADMIN_EMAILS=you@example.com
+
+# Where the digest is delivered. No default — without it the digest job reports
+# that it is unconfigured, rather than failing at 08:00 with a network error.
+Environment=RW_HUBBUB_BASE=https://notify.example.com
+
+# Absolute URL of this dashboard, used only for the digest's links: an email has
+# no origin to resolve a relative path against. Omit it and the digest carries
+# no links at all, which is better than carrying broken ones.
+Environment=RW_DASHBOARD_URL=https://relwatch.example.com
+
+# Only needed when a reverse proxy mounts the dashboard under a sub-path. Every
+# link, form action and redirect is built from this, so it must match the
+# proxy's route exactly.
+#Environment=RW_BASE_PATH=/releases
+
+# Quoted: systemd splits Environment= on whitespace, so an unquoted cron pattern
+# arrives as just "0" and croner rejects it at startup — which under
+# Restart=on-failure is a crash loop serving nothing.
+Environment="RW_POLL_CRON=0 */6 * * *"
+Environment="RW_DIGEST_CRON=0 8 * * *"
+
+# openai-responses (default) or anthropic. The base URLs default to the gateways
+# described in README.md; set them explicitly for anything else.
+Environment=RW_BACKEND=openai-responses
+#Environment=RW_OPENAI_BASE=https://gateway.example.com/openai/v1
+#Environment=RW_OPENAI_MODEL=gpt-5.5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relwatch
+
+[Install]
+WantedBy=multi-user.target

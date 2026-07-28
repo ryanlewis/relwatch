@@ -1,8 +1,8 @@
 // Central configuration. Every tunable lives here, and every one is an RW_* env var
 // so the systemd unit is the single place deployment differs from a local run.
 //
-// See DESIGN.md §7 for the canonical table. Names not in that table are marked
-// "(not in DESIGN §7)" — they exist because the implementation needed them.
+// This file is the canonical list. README.md's configuration table is written by
+// hand from it, so a knob added here needs a row added there.
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -56,15 +56,16 @@ export function expandHome(p: string): string {
 }
 
 // --- LLM backend -----------------------------------------------------------
-// Both hostnames are internal-only DNS, resolvable from #chatgpt-tagged exe.dev
-// VMs. Neither takes an API key: the integrations authenticate the VM itself,
-// which is why relwatch keeps no LLM credentials on disk.
+// The defaults point at an OpenAI-compatible and an Anthropic-compatible gateway
+// on the host network. Neither takes an API key, because the gateway authenticates
+// the machine rather than the caller — which is why relwatch keeps no LLM
+// credentials on disk. Point RW_OPENAI_BASE / RW_ANTHROPIC_BASE at any compatible
+// endpoint; a real api.openai.com key would need a code change to pass through.
 //
-//   openai-responses — chatgpt.int.exe.xyz, backed by the ChatGPT subscription
-//                      (billed outside the exe.dev token allocation). Responses
-//                      API only: needs stream:true + store:false, rejects
-//                      max_output_tokens. See DESIGN §2.
-//   anthropic        — llm.int.exe.xyz, metered against the $20/mo allocation.
+//   openai-responses — Responses API only: needs stream:true and store:false,
+//                      and rejects max_output_tokens. That constraint is the
+//                      reason the provider seam in triage/ exists.
+//   anthropic        — plain Messages API, no such constraints.
 export const BACKENDS = ["openai-responses", "anthropic"] as const;
 export type Backend = (typeof BACKENDS)[number];
 
@@ -101,8 +102,8 @@ export const DB_PATH = expandHome(
 export const PORT = intEnv(process.env.RW_PORT, 8000, 1);
 
 /**
- * (not in DESIGN §7) Sub-path the dashboard is served under, because the target
- * deployment mounts it at `relwatch.example.com` rather than a bare domain.
+ * Sub-path the dashboard is served under, for a deployment that mounts it behind
+ * a reverse proxy at `/analytics` rather than on a bare domain.
  *
  * Normalised to either "" (root) or a leading-slash, no-trailing-slash prefix,
  * so `BASE_PATH + "/app/1"` is always well-formed. Every link, form action and
@@ -116,14 +117,26 @@ export function normaliseBasePath(raw: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-export const BASE_PATH = normaliseBasePath(process.env.RW_BASE_PATH ?? "/analytics");
+export const BASE_PATH = normaliseBasePath(process.env.RW_BASE_PATH ?? "");
+
+/**
+ * Absolute URL of the dashboard, used only by the digest — an email has no origin
+ * to resolve a relative link against, and the service cannot infer its own public
+ * URL from behind a reverse proxy without trusting a forwarded header.
+ *
+ * Unset means the digest simply omits its dashboard links rather than emitting a
+ * broken one.
+ */
+export const DASHBOARD_URL = (process.env.RW_DASHBOARD_URL ?? "").replace(/\/+$/, "");
 
 // Matched against the X-ExeDev-Email header the exe.dev proxy injects. That
-// header is only trustworthy *behind* the proxy — reached directly it is
-// whatever the client says it is. See DESIGN §5.1.
-export const ADMIN_EMAILS: readonly string[] = (
-  process.env.RW_ADMIN_EMAILS ?? "you@example.com"
-)
+// header is only trustworthy *behind* a proxy that strips client-supplied copies
+// of it — reached directly it is whatever the client says it is. See SECURITY.md.
+//
+// Empty by default: an unset RW_ADMIN_EMAILS means nobody is an admin, so a
+// misconfigured deployment fails closed rather than handing the roster to the
+// first identity the header happens to carry.
+export const ADMIN_EMAILS: readonly string[] = (process.env.RW_ADMIN_EMAILS ?? "")
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter((s) => s.length > 0);
@@ -134,24 +147,27 @@ export const DIGEST_CRON = process.env.RW_DIGEST_CRON ?? "0 8 * * *";
 export const TZ = process.env.RW_TZ ?? "Europe/London";
 
 // --- Sources ---------------------------------------------------------------
-// (not in DESIGN §7) Unauthenticated GitHub allows 60 req/hr; 38 feeds every 6 h
-// sits well under it. If it ever bites, drop a fine-grained read-only PAT at
-// this path and the poller picks it up — no code change.
+// Unauthenticated GitHub allows 60 req/hr, which a few dozen feeds every 6 h sits
+// well under. If it ever bites, drop a fine-grained read-only PAT at this path and
+// the poller picks it up — no code change.
 export const GITHUB_TOKEN_FILE = expandHome(
   process.env.RW_GITHUB_TOKEN_FILE ?? "~/.config/relwatch/github-token",
 );
 export const GITHUB_PER_PAGE = intEnv(process.env.RW_GITHUB_PER_PAGE, 10, 1);
-// (not in DESIGN §7) DESIGN §8.1 flags 5 as a guess; make it a knob so revising
-// it is an env change rather than a redeploy of new code.
+// How deep the first poll of an app reaches. Five is a guess, so it is a knob:
+// revising it is an env change rather than a redeploy.
 export const BACKFILL_DEPTH = intEnv(process.env.RW_BACKFILL_DEPTH, 5, 0);
 export const SOURCE_TIMEOUT_MS = durationEnv(process.env.RW_SOURCE_TIMEOUT, 20_000);
 export const USER_AGENT =
-  process.env.RW_USER_AGENT ?? "relwatch/0.1 (+https://relwatch.example.com)";
+  process.env.RW_USER_AGENT ?? "relwatch/0.1 (+https://github.com/ryanlewis/relwatch)";
 
-// --- Digest / Hubbub -------------------------------------------------------
-export const HUBBUB_BASE = process.env.RW_HUBBUB_BASE ?? "https://notify.example.com";
-// (not in DESIGN §7) DESIGN §6.6 puts the key at this path, 0600. Read at call
-// time rather than boot so a rotated key doesn't need a service restart.
+// --- Digest / hubbub -------------------------------------------------------
+// No default: the digest has nowhere to go until an operator names their hub, and
+// a placeholder host would turn "unconfigured" into a connection error at 08:00
+// rather than at startup.
+export const HUBBUB_BASE = process.env.RW_HUBBUB_BASE ?? "";
+// The hubbub API key, expected 0600. Read at call time rather than at boot, so a
+// rotated key doesn't need a service restart.
 export const HUBBUB_KEY_FILE = expandHome(
   process.env.RW_HUBBUB_KEY_FILE ?? "~/.config/relwatch/hubbub-key",
 );
