@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Conventional Commits, checked in shell rather than by a marketplace action:
+  # the rule is a regex and a length, and a dependency has to earn itself.
+  commits:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Subjects follow Conventional Commits
+        env:
+          # Through the environment, not ${{ }} inside the script: interpolating
+          # event data straight into a shell body is how workflows get injected.
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$PR_BASE" ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -z "${BEFORE//0/}" ]; then
+            # First push of a branch has no "before" to diff against, so the
+            # whole history is the range. Everything in it already conforms.
+            range="$AFTER"
+          else
+            range="$BEFORE..$AFTER"
+          fi
+
+          types='build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test'
+          pattern="^($types)(\([a-z0-9,/-]+\))?!?: [^ ].*$"
+          failed=0
+
+          for sha in $(git rev-list --no-merges $range); do
+            subject=$(git log --format=%s -1 "$sha")
+            short=$(git rev-parse --short "$sha")
+
+            # git revert and git merge write their own subjects. Failing those
+            # would block a correct commit on a technicality nobody chose.
+            case "$subject" in
+              Revert\ \"*|"Merge "*) continue ;;
+            esac
+
+            # A squash merge arrives with " (#123)" appended. That suffix is
+            # GitHub's, not the author's, so it is measured out rather than
+            # spending someone's character budget — a subject written at the
+            # limit would otherwise fail only once it merged.
+            written=$(printf '%s' "$subject" | sed -E 's/ \(#[0-9]+\)$//')
+
+            if ! printf '%s' "$written" | grep -Eq "$pattern"; then
+              echo "::error::$short: not a Conventional Commit subject: $subject"
+              failed=1
+            elif [ "${#written}" -gt 72 ]; then
+              echo "::error::$short: subject is ${#written} chars, limit is 72: $subject"
+              failed=1
+            elif [ "${written%.}" != "$written" ]; then
+              echo "::error::$short: subject ends in a full stop: $subject"
+              failed=1
+            else
+              echo "  ok  $short  $subject"
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo
+            echo "Expected: <type>(<scope>)!: <subject>   see the Commits section of CLAUDE.md"
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # bun-version-file keeps CI on the same runtime as a developer's checkout,
+      # so bumping it is a one-line change in one place.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: .bun-version
+
+      # --frozen-lockfile: CI installs what the lockfile says or fails. A silent
+      # resolution to something newer is how a green run stops describing the
+      # tree it was meant to test.
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Coverage thresholds live in bunfig.toml, so erosion fails here rather
+      # than being noticed a quarter later.
+      - name: Test
+        run: bun test
+
+      # The deploy artefact is a compiled single-file binary. Catching a
+      # compile break in CI beats catching it mid-deploy; the output is
+      # discarded because the release build is made from a tagged checkout.
+      - name: Compile
+        run: bun build --compile --outfile /tmp/relwatch-ci src/index.ts
