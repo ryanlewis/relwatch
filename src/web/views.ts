@@ -1,7 +1,7 @@
 // Dashboard views. The default is an inbox of news awaiting acknowledgement —
 // neither dismissed nor backfilled. Both stay browsable through per-app history
 // and the "all" filter, because nothing here ever deletes.
-import type { App, ReleaseWithApp, Verdict } from "../db.js";
+import { inInbox, type App, type ReleaseWithApp, type Store, type Verdict } from "../db.js";
 import { url } from "./auth.js";
 import {
   dayKey,
@@ -16,15 +16,26 @@ import {
 
 const VERDICTS: Verdict[] = ["major", "interesting", "maintenance"];
 
+// Row caps, named rather than left to the store's defaults, because a renderer
+// has to be able to say when a list hit one — a caller that got exactly `limit`
+// rows cannot otherwise tell a full page from a complete answer.
+export const INBOX_LIMIT = 300;
+export const APP_HISTORY_LIMIT = 200;
+
 export interface InboxView {
   releases: ReleaseWithApp[];
   apps: App[];
   isAdmin: boolean;
   /** Active verdict filter, if any. */
   verdict?: Verdict | undefined;
+  /** Active app filter, if any. Reported by the machine renderings; the page
+   * itself has no chip for it. */
+  appId?: number | undefined;
   /** Showing dismissed releases too. */
   all: boolean;
   counts: { apps: number; releases: number; inbox: number; pendingDigest: number };
+  /** The row cap the list was fetched under, so a renderer can say it hit it. */
+  limit?: number | undefined;
   now?: number;
 }
 
@@ -67,6 +78,8 @@ export interface AppView {
   counts: InboxView["counts"];
   /** Hide dismissed releases on this page. */
   hideDismissed?: boolean;
+  /** The row cap the history was fetched under. */
+  limit?: number | undefined;
   now?: number;
 }
 
@@ -78,7 +91,7 @@ export function renderApp(view: AppView): string {
   // dismissed-or-not (was it acknowledged) and backfilled-or-not (is it history
   // that will never be emailed). The inbox is what neither applies to — the
   // tallies overlap by design, so each is counted directly rather than derived.
-  const inbox = releases.filter((r) => r.dismissed_at === null && !r.backfilled);
+  const inbox = releases.filter(inInbox);
   const dismissed = releases.filter((r) => r.dismissed_at !== null).length;
   const history = releases.filter((r) => r.backfilled).length;
   const shown = hideDismissed ? inbox : releases;
@@ -197,6 +210,74 @@ export function renderRoster(view: RosterView): string {
   return layout({ title: "Roster — relwatch", body });
 }
 
+// --- reading a view out of the store ---------------------------------------
+//
+// Every surface goes through these: the routes, and the CLI. Which rows a view
+// contains — which exclusions, which cap — is decided once here, so `relwatch
+// inbox` and the dashboard cannot answer the same question differently.
+
+export interface InboxQuery {
+  verdict?: Verdict | undefined;
+  appId?: number | undefined;
+  all?: boolean;
+  isAdmin?: boolean;
+  now?: number | undefined;
+}
+
+export function buildInboxView(store: Store, q: InboxQuery = {}): InboxView {
+  const all = q.all === true;
+  return {
+    releases: store.listReleases({
+      // "All" means all: dismissed rows and backfilled history alike. Both are
+      // hidden from the default view, for different reasons (see listReleases).
+      includeDismissed: all,
+      includeBackfilled: all,
+      ...(q.verdict ? { verdict: q.verdict } : {}),
+      ...(q.appId ? { appId: q.appId } : {}),
+      limit: INBOX_LIMIT,
+    }),
+    apps: store.listApps(),
+    isAdmin: q.isAdmin === true,
+    verdict: q.verdict,
+    appId: q.appId,
+    all,
+    counts: store.counts(),
+    limit: INBOX_LIMIT,
+    ...(q.now === undefined ? {} : { now: q.now }),
+  };
+}
+
+/** Null when there is no such app, which every surface renders as a 404. */
+export function buildAppView(
+  store: Store,
+  id: number,
+  q: { hideDismissed?: boolean; isAdmin?: boolean; now?: number | undefined } = {},
+): AppView | null {
+  const app = store.getApp(id);
+  if (!app) return null;
+  return {
+    app,
+    // Always fetch everything: the view reports counts across all three
+    // states, and `hideDismissed` only decides what is rendered.
+    releases: store.listAppHistory(id, APP_HISTORY_LIMIT),
+    isAdmin: q.isAdmin === true,
+    counts: store.counts(),
+    hideDismissed: q.hideDismissed === true,
+    limit: APP_HISTORY_LIMIT,
+    ...(q.now === undefined ? {} : { now: q.now }),
+  };
+}
+
+export function buildRosterView(store: Store, q: { isAdmin?: boolean } = {}): RosterView {
+  return {
+    // Removed apps stay listed: soft delete keeps the history, and a roster
+    // that hid them would make a deactivated app look deleted.
+    apps: store.listApps({ includeInactive: true }),
+    isAdmin: q.isAdmin === true,
+    counts: store.counts(),
+  };
+}
+
 // --- fragments -------------------------------------------------------------
 
 function header(counts: InboxView["counts"], isAdmin: boolean): SafeHtml {
@@ -241,8 +322,9 @@ function filters(verdict: Verdict | undefined, all: boolean): SafeHtml {
   `;
 }
 
-/** Bucket a newest-first list into contiguous days, preserving that order. */
-function byDay(releases: readonly ReleaseWithApp[]): { key: string; items: ReleaseWithApp[] }[] {
+/** Bucket a newest-first list into contiguous days, preserving that order.
+ * Shared with the markdown rendering so the two agree on where a day ends. */
+export function byDay(releases: readonly ReleaseWithApp[]): { key: string; items: ReleaseWithApp[] }[] {
   const groups: { key: string; items: ReleaseWithApp[] }[] = [];
   for (const r of releases) {
     const key = dayKey(r.published_at, r.fetched_at);

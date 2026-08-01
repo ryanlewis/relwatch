@@ -1,11 +1,8 @@
 # relwatch
 
-**Watch the projects you actually use, and be told what changed — once, in
-priority order, without a backlog.**
-
-relwatch polls a curated roster of upstream projects, asks an LLM to triage
-each release the moment it arrives, and serves the result two ways: a dashboard
-you can browse, and a daily email digest.
+relwatch watches a list of upstream projects for new releases, runs each one
+through an LLM to work out whether it matters, and puts the result in two
+places: a dashboard and a daily email digest.
 
 ```
 ┌─ MAJOR ────────────────────────────────────────────────────────┐
@@ -16,29 +13,36 @@ you can browse, and a daily email digest.
 └────────────────────────────────────────────────────────────────┘
 ```
 
-It exists because the usual approach — point an RSS reader at 38
-`releases.atom` feeds — produces a 108-entry unread pile that stops being read.
-An RSS reader's "unread" is the wrong state model for this: what you want to
-know is *which of these matters*, and you want to be told once.
+I built it because I was watching 38 projects through their `releases.atom`
+feeds in an RSS reader, and that had quietly stopped working. Every GitHub repo
+publishes one of those feeds, so it costs nothing to set up and it's fine for a
+while. Then you open the reader to 108 unread entries and there's no way to tell
+from the list which is the Neovim LSP rewrite and which is a lockfile bump. I
+was marking everything read most mornings, which isn't really watching anything.
 
 ## Why not an RSS reader
 
-A reading app pressed into service as release infrastructure gives you a queue,
-and a queue you don't clear becomes a queue you ignore. relwatch differs in
-three ways that matter:
+Feed readers assume you want to read what they fetch. I didn't — I wanted to be
+told about the few releases that needed something from me. Three places that
+showed up:
 
-- **Every release is triaged at ingest**, so the dashboard sorts by importance
-  rather than by arrival, and the digest leads with what you'd want to act on.
-- **History is not news.** Seeding a new app backfills its recent releases as
-  browsable archive, marked so they are never triaged, never emailed and never
-  counted as unread. Adding a project doesn't cost you an inbox.
-- **Nothing is ever deleted.** Dismissing hides a release; removing an app
-  deactivates it and keeps its history. The store is an archive, not a delta
-  ledger.
+- **Unread tracks whether I'd seen an entry, not whether it was worth seeing**,
+  and the ordering is by arrival. relwatch triages each release as it comes in,
+  so the dashboard sorts by importance and the digest leads with the major ones.
+- **Subscribing to a project dumped its last ten releases in as unread news**,
+  however old they were, so the cheap way to keep the pile down was to watch
+  fewer things. relwatch stamps a watermark on an app's first poll and treats
+  anything published before it as history: browsable, but never triaged, never
+  emailed, never counted as unread.
+- **A feed is a window, not an archive.** `releases.atom` carries only the most
+  recent entries, so anything I hadn't got to eventually scrolled out of the
+  feed, and out of the reader with it. relwatch keeps everything — dismissing a
+  release hides it, removing an app deactivates it and keeps its history, and
+  nothing is deleted.
 
 ## Status
 
-Working, deployed, and in daily use by one person. Pre-1.0: `RW_*` names and
+Working, deployed, and something I use every day. Pre-1.0: `RW_*` names and
 defaults can still change, and a change that breaks an operator is marked
 `BREAKING CHANGE:` in the commit rather than left implied.
 
@@ -181,7 +185,7 @@ inline script is an enhancement layered over forms that work without it.
 | Route | | |
 |---|---|---|
 | `GET /` | public | The inbox: news awaiting acknowledgement. `?verdict=`, `?app=`, `?all=1` |
-| `GET /app/:id` | public | Per-app history — dismissed and backfilled included |
+| `GET /app/:id` | public | Per-app history — dismissed and backfilled included. `?hide=1` |
 | `GET /roster` | public | The roster; add/remove controls for admins |
 | `GET /healthz` | public | `{ok, apps, releases, inbox, pendingDigest, last_fetch}` |
 | `POST /api/releases/:id/dismiss` | admin | |
@@ -203,6 +207,51 @@ stays in the inbox until you clear it, however you first saw it. Dismissing
 means seen, everywhere.
 
 `?all=1` includes both hidden sets, so "all" means all.
+
+### JSON and markdown
+
+The three read routes render in three formats. `?format=json` and `?format=md`
+sit alongside the page, and `Accept: application/json` or `text/markdown` does
+the same thing for a caller that would rather set a header. An unrecognised
+`?format=` falls back to the page rather than erroring, the same way a bogus
+`?verdict=` falls back to no filter. The same two renderings are what
+[the CLI](#the-cli) prints.
+
+```sh
+curl -s 'localhost:8000/?format=md'                  # the inbox, to read
+curl -s 'localhost:8000/?format=json' | jq           # the inbox, to process
+curl -s 'localhost:8000/?verdict=major&format=json'  # every filter still applies
+curl -s 'localhost:8000/roster?format=md'
+```
+
+This exists because the alternative was reading the SQLite file over SSH with
+a hand-written join, which duplicates the inbox definition in a second place
+and gets it wrong the first time the two disagree. All three formats render
+the *same* view object, so a filter that changes the page changes them with it.
+
+Both formats carry the release id, which is what
+`POST /api/releases/:id/dismiss` wants — so a caller can acknowledge what it
+has read. The markdown says so at the foot of each list.
+
+Two things worth knowing before you parse it:
+
+- **`notes` is not included.** It is the raw upstream release body — the input
+  to triage, routinely tens of kilobytes, and three hundred of them is not a
+  payload anyone wants. What triage made of it is in `summary` and
+  `highlights`; `url` is where the original lives.
+- **The lists are capped** at 300 releases for the inbox and 200 for an app's
+  history. JSON reports `limit` and `limit_reached`; markdown says so in the
+  body. Hitting the cap is not silent in either.
+
+The JSON gives each release the three states by name rather than leaving them
+to be re-derived — `in_inbox`, `backfilled`, and the `dismissed_at` /
+`emailed_at` / `triaged_at` stamps — because conflating any two of them is
+where the bugs in this thing have come from. A release whose triage failed
+carries `triage_error` with `verdict: null`; it is never dropped.
+
+Markdown is escaped the way the HTML is. Release titles and LLM summaries are
+upstream text, and a newline plus a `## ` in a title would otherwise open a
+section a reader has no way to tell from one relwatch wrote.
 
 ### Authentication
 
@@ -253,6 +302,33 @@ A failed digest, and a poller that has ingested nothing for 24 hours, both
 raise an alert narrowed to a `ntfy` channel at high priority. Narrowing matters:
 a broken email path must not swallow the notice that the email path is broken.
 
+## The CLI
+
+The same three views, read straight off the store. Bare `relwatch` runs the
+service, exactly as the systemd unit expects; a subcommand reads and exits.
+
+```sh
+relwatch inbox                     # markdown, the default
+relwatch inbox --json | jq         # the same view, machine-readable
+relwatch inbox --verdict=major --all
+relwatch app 12 --hide
+relwatch roster
+relwatch help
+```
+
+Use this when you are already on the host — over `ssh`, or with the service
+stopped. Across a network, `?format=` on the HTTP routes is the same data
+without needing a shell.
+
+**The store is opened read-only.** That is not tidiness: a binary newer than
+the running service would otherwise apply a migration on what the operator
+thought was a read, and a typo'd `RW_DB` would create an empty database and
+report inbox zero off it. A path that isn't there is an error.
+
+Reads only. Dismissing is a mutation and goes through the HTTP surface, which
+is where the admin check lives — the markdown output prints the route and the
+ids to go with it.
+
 ## Deployment
 
 One process, one SQLite file, one systemd unit.
@@ -284,7 +360,7 @@ bun test src/db.test.ts
 bun test --test-name-pattern "dismiss"
 ```
 
-307 tests, all offline: HTTP goes through a typed `fetch` stub, triage through
+363 tests, all offline: HTTP goes through a typed `fetch` stub, triage through
 a stub provider or an injected `generate`, delivery through a stubbed hub.
 Coverage thresholds are enforced in `bunfig.toml`, so erosion fails the run.
 
@@ -296,10 +372,10 @@ conventions in full.
 ## Prior art
 
 [newreleases.io](https://newreleases.io) and GitHub's own release notifications
-both do the watching well and stop at delivery — you still read everything. RSS
-readers give you the same firehose with worse tooling. What relwatch adds is the
-triage step and the distinction between news and history; what it gives up is
-being a hosted service anyone can sign up for.
+both do the watching well, but they stop at delivery — you still read
+everything. The difference here is the triage step and the split between news
+and history. The trade is that they're hosted services anyone can sign up for,
+and this is a binary you run yourself.
 
 ## Security
 

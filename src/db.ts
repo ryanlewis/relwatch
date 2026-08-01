@@ -85,6 +85,19 @@ export interface TriageResult {
   highlights: string[];
 }
 
+/**
+ * The inbox definition, for callers holding rows rather than writing SQL:
+ * news awaiting acknowledgement, so undismissed *and* not backfilled.
+ *
+ * `listReleases`, `counts().inbox` and `dismissAll` say the same thing in SQL.
+ * Every other place that needs it says it through here, because dismissed
+ * (something the operator did) and backfilled (something the release is) are
+ * independent axes, and conflating two of them is where the bugs here start.
+ */
+export function inInbox(r: Pick<Release, "dismissed_at" | "backfilled">): boolean {
+  return r.dismissed_at === null && !r.backfilled;
+}
+
 export interface InboxFilter {
   /** Undismissed only (the default inbox) vs everything (the "all" view). */
   includeDismissed?: boolean;
@@ -287,13 +300,36 @@ const RELEASE_WITH_APP_SELECT = `
   JOIN apps a ON a.id = r.app_id
 `;
 
+export interface StoreOptions {
+  /**
+   * Open for reading only: no parent directory, no migrations, and a missing
+   * file is an error rather than a new empty database.
+   *
+   * Both halves of that matter to the CLI, which reads a store the service
+   * usually has open. A binary newer than the running service would otherwise
+   * migrate the schema out from under it on what the operator thought was a
+   * read; and a typo'd `RW_DB` would create an empty database and report inbox
+   * zero off it, which is the most convincing possible way to say "nothing to
+   * see here".
+   */
+  readonly?: boolean;
+}
+
 export class Store {
   readonly db: Database;
   /** Migrations on a real file are worth a journal line; per-test ones are noise. */
   private readonly quiet: boolean;
 
-  constructor(path: string) {
+  constructor(path: string, opts: StoreOptions = {}) {
     this.quiet = path === ":memory:";
+    if (opts.readonly) {
+      // WAL and foreign_keys are writes to the connection's own state that a
+      // reader neither needs nor is entitled to make; busy_timeout is the one
+      // that matters here, so a read during a poll cycle waits it out.
+      this.db = new Database(path, { readonly: true });
+      this.db.exec("PRAGMA busy_timeout = 5000");
+      return;
+    }
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { create: true });
     // WAL lets the dashboard read while a poll cycle writes. foreign_keys is

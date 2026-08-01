@@ -3,11 +3,28 @@
 // Mutations are plain form POSTs rather than fetch() calls, so the dashboard
 // needs no client JavaScript and no build step. That includes app removal:
 // HTML forms can't issue DELETE, so it is POST /api/apps/:id/delete.
-import type { AppKind, Store, Verdict } from "../db.js";
+import { inInbox, type AppKind, type Store, type Verdict } from "../db.js";
 import { BASE_PATH } from "../config.js";
 import { deriveAppName } from "../source/index.js";
 import { identify, requireAdmin, url } from "./auth.js";
-import { renderApp, renderInbox, renderRoster } from "./views.js";
+import {
+  appJson,
+  appMarkdown,
+  inboxJson,
+  inboxMarkdown,
+  negotiate,
+  rosterJson,
+  rosterMarkdown,
+  type Format,
+} from "./formats.js";
+import {
+  buildAppView,
+  buildInboxView,
+  buildRosterView,
+  renderApp,
+  renderInbox,
+  renderRoster,
+} from "./views.js";
 
 const VERDICTS: readonly Verdict[] = ["major", "interesting", "maintenance"];
 
@@ -26,6 +43,28 @@ function htmlResponse(body: string, status = 200): Response {
     status,
     headers: { "content-type": "text/html; charset=utf-8" },
   });
+}
+
+/**
+ * Render one view in whichever format the caller negotiated.
+ *
+ * Every read route goes through here, so the content type is decided in one
+ * place — a renderer cannot be added and then served in HTML's clothing — and
+ * all three formats are handed the same view object rather than each building
+ * its own idea of what the page contains.
+ */
+function render<V>(
+  format: Format,
+  view: V,
+  renderers: { html: (v: V) => string; json: (v: V) => unknown; md: (v: V) => string },
+): Response {
+  if (format === "json") return Response.json(renderers.json(view));
+  if (format === "md") {
+    return new Response(renderers.md(view), {
+      headers: { "content-type": "text/markdown; charset=utf-8" },
+    });
+  }
+  return htmlResponse(renderers.html(view));
 }
 
 /**
@@ -52,7 +91,7 @@ function dismissResult(store: Store, dismissed: number, appId?: number): Respons
       total: releases.length,
       // Same three tallies the app page renders, and the same definitions:
       // "inbox" is news awaiting acknowledgement, so history is not in it.
-      inbox: releases.filter((r) => r.dismissed_at === null && !r.backfilled).length,
+      inbox: releases.filter(inInbox).length,
       dismissed: releases.filter((r) => r.dismissed_at !== null).length,
       history: releases.filter((r) => r.backfilled).length,
     };
@@ -103,11 +142,11 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
   const method = req.method.toUpperCase();
 
   if (method === "GET" && path === "/") return inbox(req, ctx, requestUrl);
-  if (method === "GET" && path === "/roster") return roster(req, ctx);
+  if (method === "GET" && path === "/roster") return roster(req, ctx, requestUrl);
 
   const appMatch = /^\/app\/(\d+)$/.exec(path);
   if (method === "GET" && appMatch) {
-    return appPage(req, ctx, Number(appMatch[1]), requestUrl.searchParams.get("hide") === "1");
+    return appPage(req, ctx, Number(appMatch[1]), requestUrl);
   }
 
   if (method === "POST") {
@@ -183,60 +222,44 @@ function inbox(req: Request, ctx: RouteContext, requestUrl: URL): Response {
   const all = requestUrl.searchParams.get("all") === "1";
   const appId = Number(requestUrl.searchParams.get("app")) || undefined;
 
-  const releases = store.listReleases({
-    // "All" means all: dismissed rows and backfilled history alike. Both are
-    // hidden from the default view, for different reasons (see listReleases).
-    includeDismissed: all,
-    includeBackfilled: all,
-    ...(verdict ? { verdict } : {}),
-    ...(appId ? { appId } : {}),
-    limit: 300,
+  const view = buildInboxView(store, {
+    verdict,
+    appId,
+    all,
+    isAdmin: identify(req).isAdmin,
+    now: ctx.now,
   });
 
-  return htmlResponse(
-    renderInbox({
-      releases,
-      apps: store.listApps(),
-      isAdmin: identify(req).isAdmin,
-      verdict,
-      all,
-      counts: store.counts(),
-      ...(ctx.now === undefined ? {} : { now: ctx.now }),
-    }),
-  );
+  return render(negotiate(requestUrl.searchParams, req), view, {
+    html: renderInbox,
+    json: inboxJson,
+    md: inboxMarkdown,
+  });
 }
 
-function appPage(
-  req: Request,
-  ctx: RouteContext,
-  id: number,
-  hideDismissed: boolean,
-): Response {
-  const app = ctx.store.getApp(id);
-  if (!app) return new Response("no such app\n", { status: 404 });
+function appPage(req: Request, ctx: RouteContext, id: number, requestUrl: URL): Response {
+  const view = buildAppView(ctx.store, id, {
+    hideDismissed: requestUrl.searchParams.get("hide") === "1",
+    isAdmin: identify(req).isAdmin,
+    now: ctx.now,
+  });
+  if (!view) return new Response("no such app\n", { status: 404 });
 
-  return htmlResponse(
-    renderApp({
-      app,
-      // Always fetch everything: the page reports counts across all three
-      // states, and `hideDismissed` only decides what is rendered.
-      releases: ctx.store.listAppHistory(id),
-      isAdmin: identify(req).isAdmin,
-      counts: ctx.store.counts(),
-      hideDismissed,
-      ...(ctx.now === undefined ? {} : { now: ctx.now }),
-    }),
-  );
+  return render(negotiate(requestUrl.searchParams, req), view, {
+    html: renderApp,
+    json: appJson,
+    md: appMarkdown,
+  });
 }
 
-function roster(req: Request, ctx: RouteContext): Response {
-  return htmlResponse(
-    renderRoster({
-      apps: ctx.store.listApps({ includeInactive: true }),
-      isAdmin: identify(req).isAdmin,
-      counts: ctx.store.counts(),
-    }),
-  );
+function roster(req: Request, ctx: RouteContext, requestUrl: URL): Response {
+  const view = buildRosterView(ctx.store, { isAdmin: identify(req).isAdmin });
+
+  return render(negotiate(requestUrl.searchParams, req), view, {
+    html: renderRoster,
+    json: rosterJson,
+    md: rosterMarkdown,
+  });
 }
 
 async function addApp(req: Request, store: Store): Promise<Response> {

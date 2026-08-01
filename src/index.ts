@@ -3,8 +3,9 @@
 // The service is long-lived under systemd (Restart=on-failure). Jobs run
 // in-process; nothing here may throw its way out of a job and take
 // the process with it.
+import { runCli } from "./cli.js";
 import { BACKEND, DB_PATH, describeConfig } from "./config.js";
-import { getStore } from "./db.js";
+import { getStore, Store } from "./db.js";
 import { startScheduler } from "./scheduler.js";
 import { AiSdkProvider } from "./triage/aisdk.js";
 import type { Provider } from "./triage/index.js";
@@ -22,6 +23,18 @@ function buildProvider(): Provider {
 }
 
 function main(): void {
+  // A subcommand reads the store and exits; bare `relwatch` runs the service,
+  // so the systemd unit is unaffected. This comes first because a read must not
+  // announce itself as a service start, open the store for writing, or build an
+  // LLM provider it will never call.
+  const args = Bun.argv.slice(2);
+  if (args.length > 0) {
+    const { stdout, stderr, code } = runCli(args, () => new Store(DB_PATH, { readonly: true }));
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+    process.exit(code);
+  }
+
   console.log(`[main] relwatch starting — ${describeConfig()}`);
 
   const store = getStore(DB_PATH);

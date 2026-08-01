@@ -66,10 +66,45 @@ config ←──────────── everything (env parsing; read onc
   web    digest
    ↑       ↑
    └── scheduler ──┘        index.ts wires store + server + cron together
+   │
+  cli                       index.ts dispatches on argv before any of that
 ```
 
 `src/db.ts` is the seam: `poll`, `triage`, `web` and `digest` all meet through
 the `Store`, and none of them import each other.
+
+### One view, four renderings
+
+`web/views.ts` owns both what a view *contains* — `buildInboxView`,
+`buildAppView`, `buildRosterView`, and the row caps they read under — and its
+HTML. `web/formats.ts` renders the same objects as JSON and markdown. The
+routes and `cli.ts` build a view and pick a renderer; neither queries the store
+for a view itself.
+
+That indirection is the point. The alternative had `relwatch inbox` and the
+dashboard each deciding which exclusions "inbox" implies, which is the same
+disagreement `inInbox` exists to prevent one level down. A filter added to a
+route belongs in the builder, not in the route.
+
+Markdown has no escaping story the way HTML does, so `inline()` is applied to
+every interpolated value, exactly as the `html` tag is. It flattens whitespace
+*before* escaping: the dangerous character is the newline, because a title
+carrying one and a `## ` opens a section a reader cannot tell from ours.
+
+### The CLI (`src/cli.ts`)
+
+`index.ts` dispatches on `Bun.argv` before it logs a start line, opens the
+store for writing, or builds a provider. Bare `relwatch` still runs the
+service, so the systemd unit is untouched.
+
+The store is opened **read-only**, which is load-bearing twice: a stale binary
+run against a live database cannot migrate the schema out from under the
+running service, and a typo'd `RW_DB` fails instead of creating an empty
+database and reporting inbox zero off it.
+
+Flag parsing is deliberately stricter than the query string, which falls back
+to the page on a bogus `?verdict=`. A browser shows you what it did; a
+mistyped flag in a script is answered silently and read as the truth.
 
 ### The three states a release can be in
 
@@ -179,7 +214,8 @@ throw in a cron callback drops that schedule until the next restart.
 
 `type` is one of `feat` `fix` `docs` `style` `refactor` `perf` `test` `build`
 `ci` `chore` `revert`. `scope` is optional and names the area rather than the
-file: `config`, `db`, `poll`, `source`, `triage`, `web`, `digest`, `scheduler`.
+file: `config`, `db`, `poll`, `source`, `triage`, `web`, `digest`, `scheduler`,
+`cli`.
 Repo-wide changes take no scope. `deps` is Renovate's, not yours. Subjects stay
 within 72 characters.
 
