@@ -353,6 +353,67 @@ describe("poll — rate limiting", () => {
   });
 });
 
+describe("poll — the liveness stamp", () => {
+  test("a cycle that ingested stamps the watermark", async () => {
+    const { store } = storeWithApp();
+    const gh = new FakeSource("github", () => ok([{ ext_id: "1" }]));
+
+    expect(store.lastPolledAt()).toBeNull();
+    await poll(store, registry(gh));
+    expect(store.lastPolledAt()).not.toBeNull();
+    store.close();
+  });
+
+  test("a cycle of pure 304s still stamps — quiet is not dead", async () => {
+    // The case the stamp exists for: every poll runs to time, nothing has
+    // shipped, and lastFetchedAt() alone would call the poller stale.
+    const { store } = storeWithApp();
+    const gh = new FakeSource("github", () => NOT_MODIFIED);
+
+    await poll(store, registry(gh));
+    expect(store.lastPolledAt()).not.toBeNull();
+    expect(store.lastFetchedAt()).toBeNull();
+    store.close();
+  });
+
+  test("a cycle where every app failed leaves the stamp alone", async () => {
+    const { store } = storeWithApp();
+    const gh = new FakeSource("github", () => {
+      throw new SourceError("GitHub 500", 500);
+    });
+
+    await poll(store, registry(gh));
+    expect(store.lastPolledAt()).toBeNull();
+    store.close();
+  });
+
+  test("rate limited before anything answered leaves the stamp alone", async () => {
+    const { store } = storeWithApp();
+    const gh = new FakeSource("github", () => {
+      throw new SourceError("GitHub rate limit exhausted", 403, true);
+    });
+
+    await poll(store, registry(gh));
+    expect(store.lastPolledAt()).toBeNull();
+    store.close();
+  });
+
+  test("one healthy app among failures is enough to stamp", async () => {
+    const store = new Store(":memory:");
+    for (const ref of ["bad/repo", "good/repo"]) {
+      store.markSeeded(store.upsertApp({ name: ref, kind: "github", ref }).id, "2020-01-01T00:00:00.000Z");
+    }
+    const gh = new FakeSource("github", (ref) => {
+      if (ref === "bad/repo") throw new SourceError("GitHub 404", 404);
+      return NOT_MODIFIED;
+    });
+
+    await poll(store, registry(gh));
+    expect(store.lastPolledAt()).not.toBeNull();
+    store.close();
+  });
+});
+
 describe("poll — backfill", () => {
   test("marks rows backfilled and keeps them off the triage worklist", async () => {
     const { store } = storeWithApp("o/r", { seeded: false });

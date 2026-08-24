@@ -80,6 +80,11 @@ export async function poll(
   const limit = opts.backfill ? BACKFILL_DEPTH : GITHUB_PER_PAGE;
   if (opts.backfill && BACKFILL_DEPTH === 0) return summary;
 
+  // Apps whose source gave any answer at all — a 304 counts, a failure
+  // doesn't. Feeds the liveness stamp below; the summary's counters can't
+  // reconstruct it because a 200 with zero releases moves none of them.
+  let consulted = 0;
+
   for (const app of apps) {
     try {
       const source = sources[app.kind];
@@ -99,6 +104,7 @@ export async function poll(
 
       if (result.notModified) {
         summary.notModified++;
+        consulted++;
         continue;
       }
 
@@ -128,6 +134,7 @@ export async function poll(
       // never wrote, and the next poll 304s straight past them.
       store.setEtag(app.id, result.etag);
       store.markSeeded(app.id);
+      consulted++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       summary.failed.push({ app: `${app.kind}:${app.ref}`, error: message });
@@ -143,6 +150,13 @@ export async function poll(
       }
     }
   }
+
+  // The liveness stamp, only when at least one source actually answered. An
+  // all-fail cycle — network down, rate limited at the first app — must read
+  // as stale so the watchdog still fires on a poller that runs but reaches
+  // nothing; a cycle of pure 304s is exactly the quiet stretch the stamp
+  // exists to vouch for.
+  if (consulted > 0) store.markPolled();
 
   console.log(
     `[poll] ${summary.apps} apps: ${summary.newReleases.length} new, ` +

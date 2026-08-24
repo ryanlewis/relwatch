@@ -520,27 +520,43 @@ describe("runDigest", () => {
 // --- watchdog --------------------------------------------------------------
 
 describe("checkQuiet", () => {
-  test("stays silent on a fresh install with no releases at all", async () => {
+  test("stays silent when no poll has stamped the watermark yet", async () => {
+    // Covers both a fresh install and the first day after an upgrade that
+    // introduced the stamp: releases may exist, the watermark doesn't.
+    const store = storeWithReleases(["major"]);
+    const calls = stubHubbub(() => ({ status: 202 }));
+    expect(await checkQuiet(store, { key: KEY, base: BASE, dryRun: false })).toBe(false);
+    expect(calls).toHaveLength(0);
+    store.close();
+  });
+
+  test("stays silent while polling is recent", async () => {
     const store = new Store(":memory:");
+    store.markPolled();
     const calls = stubHubbub(() => ({ status: 202 }));
     expect(await checkQuiet(store, { key: KEY, base: BASE, dryRun: false })).toBe(false);
     expect(calls).toHaveLength(0);
     store.close();
   });
 
-  test("stays silent while ingestion is recent", async () => {
+  test("stays silent through a release-free stretch as long as polls complete", async () => {
+    // The false positive this watermark exists to end: last ingest 25 h ago,
+    // but every cycle since has run and found nothing new.
     const store = storeWithReleases(["major"]);
+    const later = new Date(Date.now() + 25 * 60 * 60 * 1000);
+    store.markPolled(new Date(later.getTime() - 60_000).toISOString());
     const calls = stubHubbub(() => ({ status: 202 }));
-    expect(await checkQuiet(store, { key: KEY, base: BASE, dryRun: false })).toBe(false);
+
+    expect(await checkQuiet(store, { key: KEY, base: BASE, dryRun: false, now: later })).toBe(false);
     expect(calls).toHaveLength(0);
     store.close();
   });
 
-  test("alerts once ingestion has been silent past the threshold", async () => {
+  test("alerts once no poll has completed past the threshold", async () => {
     const store = storeWithReleases(["major"]);
+    store.markPolled();
     const calls = stubHubbub(() => ({ status: 202 }));
 
-    // A silently broken poller looks exactly like a quiet week from outside.
     const later = new Date(Date.now() + 25 * 60 * 60 * 1000);
     expect(await checkQuiet(store, { key: KEY, base: BASE, dryRun: false, now: later })).toBe(true);
     expect(calls[0]?.body["channels"]).toEqual(["ntfy"]);

@@ -279,6 +279,19 @@ describe("GET /healthz", () => {
     store.close();
   });
 
+  test("reports activity and liveness as separate timestamps", async () => {
+    const { store } = seeded();
+    store.markPolled("2026-08-24T17:00:00.000Z");
+    const res = await handle(new Request("http://localhost/healthz"), { store });
+    const body = await jsonBody(res);
+
+    // last_fetch moves when a release lands; last_poll when a cycle completes.
+    // A monitor reading last_fetch as liveness pages on every quiet day.
+    expect(body["last_poll"]).toBe("2026-08-24T17:00:00.000Z");
+    expect(body["last_fetch"]).not.toBeNull();
+    store.close();
+  });
+
   test("503s when the store is unreadable, so uptime can tell it apart", async () => {
     const { store } = seeded();
     store.close(); // simulate a broken store

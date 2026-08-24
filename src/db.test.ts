@@ -35,6 +35,7 @@ describe("migrations", () => {
     original.insertRelease({ app_id: app.id, ext_id: "r1", tag: "v1" });
     // Wind it back to the v1 shape.
     original.db.exec("ALTER TABLE apps DROP COLUMN seeded_at");
+    original.db.exec("DROP TABLE meta");
     original.db.exec("PRAGMA user_version = 1");
     original.close();
 
@@ -413,6 +414,26 @@ describe("counts and watchdog", () => {
     const app = seedApp(s);
     s.insertRelease({ app_id: app.id, ext_id: "a" });
     expect(s.lastFetchedAt()).not.toBeNull();
+    s.close();
+  });
+
+  test("the poll watermark is null until stamped and moves on restamp", () => {
+    const s = freshStore();
+    expect(s.lastPolledAt()).toBeNull();
+    s.markPolled("2026-08-24T05:00:00.000Z");
+    expect(s.lastPolledAt()).toBe("2026-08-24T05:00:00.000Z");
+    s.markPolled("2026-08-24T11:00:00.000Z");
+    expect(s.lastPolledAt()).toBe("2026-08-24T11:00:00.000Z");
+    s.close();
+  });
+
+  test("the poll watermark is independent of ingest", () => {
+    // The whole point of the stamp: a release-free cycle still proves the
+    // poller alive, and an ingest does not fake a completed cycle.
+    const s = freshStore();
+    const app = seedApp(s);
+    s.insertRelease({ app_id: app.id, ext_id: "a" });
+    expect(s.lastPolledAt()).toBeNull();
     s.close();
   });
 });

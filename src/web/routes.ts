@@ -205,7 +205,16 @@ export async function handle(req: Request, ctx: RouteContext): Promise<Response>
 function healthz(store: Store): Response {
   try {
     const counts = store.counts();
-    return Response.json({ ok: true, ...counts, last_fetch: store.lastFetchedAt() });
+    // last_fetch is activity (moves when a release lands); last_poll is
+    // liveness (moves when a poll cycle gets an answer). A monitor wanting
+    // "is it alive" reads last_poll — a release-free day makes last_fetch
+    // look stale while nothing is wrong.
+    return Response.json({
+      ok: true,
+      ...counts,
+      last_fetch: store.lastFetchedAt(),
+      last_poll: store.lastPolledAt(),
+    });
   } catch (err) {
     // "Process up" and "store readable" are different facts, and an uptime
     // check wants to be able to tell them apart.

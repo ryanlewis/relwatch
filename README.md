@@ -187,7 +187,7 @@ inline script is an enhancement layered over forms that work without it.
 | `GET /` | public | The inbox: news awaiting acknowledgement. `?verdict=`, `?app=`, `?all=1` |
 | `GET /app/:id` | public | Per-app history — dismissed and backfilled included. `?hide=1` |
 | `GET /roster` | public | The roster; add/remove controls for admins |
-| `GET /healthz` | public | `{ok, apps, releases, inbox, pendingDigest, last_fetch}` |
+| `GET /healthz` | public | `{ok, apps, releases, inbox, pendingDigest, last_fetch, last_poll}` |
 | `POST /api/releases/:id/dismiss` | admin | |
 | `POST /api/releases/dismiss-all` | admin | Everything currently in the inbox |
 | `POST /api/apps/:id/dismiss-all` | admin | Scoped to one app |
@@ -196,6 +196,14 @@ inline script is an enhancement layered over forms that work without it.
 
 `/healthz` sits outside `RW_BASE_PATH`, so an uptime check needn't know where
 the dashboard is mounted.
+
+`last_fetch` is activity: the most recent ingest, which stands still through
+any stretch in which nothing ships. `last_poll` is liveness: it advances every
+time a poll cycle gets an answer from at least one source, releases or not. A
+monitor asking "is relwatch alive" should read `last_poll` — reading
+`last_fetch` for that pages on every quiet day. It is `null` until the first
+completed cycle after install or upgrade. The built-in watchdog (an ntfy alert
+after 24 h, checked at digest time) reads `last_poll` for the same reason.
 
 ### What the inbox means
 
@@ -298,9 +306,11 @@ Three rules govern sending:
   in both parts, and marks only the included ids as emailed, so the remainder
   rolls into the next send.
 
-A failed digest, and a poller that has ingested nothing for 24 hours, both
+A failed digest, and a poller that has not completed a cycle for 24 hours, both
 raise an alert narrowed to a `ntfy` channel at high priority. Narrowing matters:
 a broken email path must not swallow the notice that the email path is broken.
+The staleness check reads the poll watermark, not the last ingest — a stretch
+in which nothing ships is upstream being quiet, not relwatch being broken.
 
 ## The CLI
 

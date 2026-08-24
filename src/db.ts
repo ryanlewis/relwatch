@@ -246,6 +246,22 @@ const MIGRATIONS: readonly string[] = [
     ON releases (published_at DESC)
     WHERE dismissed_at IS NULL AND backfilled = 0;
   `,
+  // v4 — the poll watermark, in a key-value side table.
+  //
+  // lastFetchedAt() is MAX(fetched_at): an *activity* signal that only moves
+  // when a poll ingests something. The watchdog and /healthz were reading it
+  // as a *liveness* signal, so any release-free 24 h — a perfectly quiet
+  // upstream stretch — reported as "the poller may be failing silently".
+  // Observed live: every 6-hourly poll finished on schedule through Aug 23–24,
+  // nothing had shipped, and healthz called ingest 26 h stale. Liveness needs
+  // its own stamp, written by the poll cycle itself whether or not anything
+  // landed.
+  `
+  CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 /** The version a freshly-migrated DB lands on. */
@@ -620,11 +636,36 @@ export class Store {
     };
   }
 
-  /** Most recent ingest across the whole store — feeds the "quiet for 24 h" watchdog. */
+  /**
+   * Most recent ingest across the whole store. Activity, not liveness: it only
+   * moves when something lands, so a quiet upstream week looks identical to a
+   * dead poller. Anything asking "is polling alive" reads lastPolledAt().
+   */
   lastFetchedAt(): string | null {
     return (
       this.db.query<{ t: string | null }, []>("SELECT MAX(fetched_at) AS t FROM releases").get()?.t ??
       null
+    );
+  }
+
+  /**
+   * Stamp the poll watermark: a poll cycle just got an answer from at least
+   * one source. poll() writes it; the watchdog and /healthz read it as the
+   * liveness signal lastFetchedAt() cannot be.
+   */
+  markPolled(at = nowIso()): void {
+    this.db.run(
+      `INSERT INTO meta (key, value) VALUES ('last_poll_at', ?)
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+      [at],
+    );
+  }
+
+  lastPolledAt(): string | null {
+    return (
+      this.db
+        .query<{ t: string }, []>("SELECT value AS t FROM meta WHERE key = 'last_poll_at'")
+        .get()?.t ?? null
     );
   }
 }

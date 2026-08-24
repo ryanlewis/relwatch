@@ -64,28 +64,34 @@ export async function runDigest(store: Store, opts: DigestOptions = {}): Promise
 }
 
 /**
- * Watchdog: nothing ingested for 24 h means the poller is silently broken,
- * which looks exactly like a quiet week from the outside.
+ * Watchdog: no completed poll cycle for 24 h means the scheduler is wedged or
+ * every fetch is failing.
+ *
+ * Deliberately reads the poll watermark, not lastFetchedAt(). Ingest is
+ * activity, and reading it as liveness meant any release-free day — a quiet
+ * upstream stretch, nothing more — tripped this with "nothing fetched for
+ * 25h" while every poll had run to time.
  */
 export async function checkQuiet(
   store: Store,
   opts: DigestOptions & { thresholdMs?: number } = {},
 ): Promise<boolean> {
   const threshold = opts.thresholdMs ?? 24 * 60 * 60 * 1000;
-  const last = store.lastFetchedAt();
+  const last = store.lastPolledAt();
   const now = (opts.now ?? new Date()).getTime();
 
-  // No releases at all is a fresh install, not a fault.
+  // No stamp yet is a fresh install, or the first day after the stamp
+  // existed — not a fault.
   if (last === null) return false;
 
   const age = now - Date.parse(last);
   if (Number.isNaN(age) || age < threshold) return false;
 
   const hours = Math.floor(age / 3_600_000);
-  console.warn(`[watchdog] nothing fetched for ${hours}h`);
+  console.warn(`[watchdog] no completed poll for ${hours}h`);
   const alerted = await alert(
-    "relwatch: no releases fetched",
-    `Nothing has been ingested for ${hours}h. The poller may be failing silently.`,
+    "relwatch: polling stalled",
+    `No poll cycle has completed for ${hours}h. The scheduler may be wedged or every fetch failing.`,
     opts,
   );
   if (!alerted.ok) console.error(`[watchdog] alert failed: ${alerted.error ?? "unknown"}`);
