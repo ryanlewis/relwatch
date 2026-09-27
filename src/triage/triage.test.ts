@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Store } from "../db.js";
 import { AiSdkProvider, asProviderError, isRepairable } from "./aisdk.js";
 import { callWithRetry, ProviderError, toInput, triagePending, type Provider } from "./index.js";
@@ -188,6 +188,23 @@ describe("callWithRetry", () => {
     expect(err.message).toBe("just a string");
   });
 
+  test("gives up on an attempt that never settles, whatever it does with the signal", async () => {
+    // Passing the signal down only helps while something still listens to it.
+    // A call that ignores it must still end, or the sweep and every poll
+    // queued behind it wait forever.
+    let calls = 0;
+    const provider: Provider = {
+      name: "wedged",
+      triage: () => {
+        calls++;
+        return new Promise<Triage>(() => undefined);
+      },
+    };
+    const err = await catchError(callWithRetry(provider, INPUT, { ...NO_BACKOFF, timeoutMs: 10 }));
+    expect(err.name).toBe("TimeoutError");
+    expect(calls).toBe(3);
+  });
+
   test("passes a signal that is already timing out", async () => {
     let seen: AbortSignal | null = null;
     const provider: Provider = {
@@ -238,6 +255,20 @@ describe("triagePending", () => {
     expect(release!.triage_error).toBe("model returned prose");
     // triaged_at stays NULL so a later sweep retries it.
     expect(store.untriagedReleases()).toHaveLength(1);
+    store.close();
+  });
+
+  test("a call that never settles is recorded as a failure, not waited on", async () => {
+    const store = storeWithPending(2);
+    const wedged: Provider = { name: "wedged", triage: () => new Promise<Triage>(() => undefined) };
+
+    const summary = await triagePending(store, wedged, {
+      retry: { ...NO_BACKOFF, attempts: 1, timeoutMs: 10 },
+    });
+
+    expect(summary).toEqual({ triaged: 0, failed: 2 });
+    expect(store.listReleases().every((r) => r.triage_error !== null)).toBe(true);
+    expect(store.untriagedReleases()).toHaveLength(2);
     store.close();
   });
 
@@ -432,6 +463,50 @@ describe("AiSdkProvider — validate/repair", () => {
     store.close();
   });
 });
+
+describe("AiSdkProvider — a refused request", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("rejects with the gateway's status instead of never settling", async () => {
+    // The exact shape seen in production: the SDK logged a 401 and left
+    // `.object` pending forever, and the timeout had nothing left to abort.
+    let calls = 0;
+    const handler = (): Promise<Response> => {
+      calls++;
+      return Promise.resolve(refusal());
+    };
+    globalThis.fetch = Object.assign(handler, { preconnect: realFetch.preconnect });
+
+    const provider = new AiSdkProvider("openai-responses");
+    const err = await catchError(provider.triage(INPUT, AbortSignal.timeout(1_000)));
+
+    expect(calls).toBe(1);
+    expect(err).toBeInstanceOf(ProviderError);
+    if (err instanceof ProviderError) {
+      expect(err.status).toBe(401);
+      expect(err.retryable).toBe(false);
+    }
+  });
+});
+
+/** What the OpenAI-shaped gateway answers when it rejects the VM's credential. */
+function refusal(): Response {
+  const body = {
+    error: {
+      message: "Incorrect API key provided",
+      type: "invalid_request_error",
+      code: "invalid_api_key",
+      param: null,
+    },
+  };
+  return new Response(JSON.stringify(body), {
+    status: 401,
+    headers: { "content-type": "application/json" },
+  });
+}
 
 describe("StubProvider", () => {
   test("produces schema-valid output for anything", async () => {

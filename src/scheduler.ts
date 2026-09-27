@@ -11,7 +11,7 @@ import type { Store } from "./db.js";
 import { checkQuiet, runDigest, type DigestOptions } from "./digest/index.js";
 import { poll, type SourceRegistry } from "./poll.js";
 import { triagePending } from "./triage/index.js";
-import type { Provider } from "./triage/index.js";
+import type { Provider, RetryOptions } from "./triage/index.js";
 
 export interface SchedulerDeps {
   store: Store;
@@ -19,6 +19,8 @@ export interface SchedulerDeps {
   sources?: SourceRegistry;
   /** Overrides for the digest job — the Hubbub base/key, or a dry-run flag. */
   digest?: DigestOptions;
+  /** Overrides for triage's retry and timeout, so tests need not wait them out. */
+  retry?: RetryOptions;
 }
 
 /**
@@ -31,7 +33,7 @@ export interface SchedulerDeps {
 export async function pollAndTriage(deps: SchedulerDeps): Promise<void> {
   const summary = await poll(deps.store, deps.sources);
   if (summary.newReleases.length === 0 && deps.store.untriagedReleases(1).length === 0) return;
-  await triagePending(deps.store, deps.provider);
+  await triagePending(deps.store, deps.provider, { retry: deps.retry });
 }
 
 /**
