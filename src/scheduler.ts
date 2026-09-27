@@ -104,6 +104,9 @@ export function startScheduler(deps: SchedulerDeps): Scheduler {
       // Piggy-backed on the digest rather than given its own schedule: the
       // daily digest is exactly the cadence at which "nothing for 24h" matters.
       await checkQuiet(deps.store, deps.digest);
+      // The watchdog's stale stamp can't tell a wedged poll from one that runs
+      // and reaches nothing; a job still busy at digest time is the former.
+      if (pollJob.isBusy()) console.warn(`[scheduler] poll still running since ${pollJob.currentRun()?.toISOString()}`);
     });
   });
 
