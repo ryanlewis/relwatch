@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DIGEST_CRON, POLL_CRON, TZ } from "./config.js";
 import { Store } from "./db.js";
 import { guard, pollAndTriage, safeCron, startScheduler, type SchedulerDeps } from "./scheduler.js";
@@ -337,6 +337,42 @@ describe("a triage call that fails or hangs", () => {
 
     scheduler.stop();
     d.store.close();
+  });
+});
+
+describe("the digest job", () => {
+  test("names a poll that is still running, which the stale stamp alone cannot", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const inTriage = new Promise<void>((resolve) => (entered = resolve));
+    const held: Provider = {
+      name: "held",
+      triage: () => {
+        entered();
+        return new Promise<Triage>((resolve) => (release = () => resolve(OK)));
+      },
+    };
+    const d = deps({ provider: held });
+    const scheduler = startScheduler(d);
+    const [pollJob, digestJob] = scheduler.jobs;
+    const warn = spyOn(console, "warn");
+
+    try {
+      const polling = pollJob!.trigger();
+      await inTriage;
+      await digestJob!.trigger();
+      expect(warn.mock.calls.some(([line]) => String(line).startsWith("[scheduler] poll still running since 20"))).toBe(true);
+
+      release();
+      await polling;
+      warn.mockClear();
+      await digestJob!.trigger();
+      expect(warn.mock.calls.some(([line]) => String(line).startsWith("[scheduler] poll still running"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      scheduler.stop();
+      d.store.close();
+    }
   });
 });
 
