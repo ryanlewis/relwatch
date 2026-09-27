@@ -97,6 +97,8 @@ export interface RetryOptions {
   attempts?: number;
   /** Exponential base. Tests set 0 so they aren't waiting out real backoff. */
   baseDelayMs?: number;
+  /** Per-attempt limit. Tests shorten it so they aren't waiting out the real one. */
+  timeoutMs?: number;
 }
 
 /**
@@ -116,11 +118,11 @@ export async function callWithRetry(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const timeout = AbortSignal.timeout(LLM_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(opts.timeoutMs ?? LLM_TIMEOUT_MS);
     const signal = outer ? AbortSignal.any([outer, timeout]) : timeout;
     try {
       // oxlint-disable-next-line no-await-in-loop -- retries are sequential by nature
-      return await provider.triage(input, signal);
+      return await settleBy(provider.triage(input, signal), signal);
     } catch (err) {
       lastError = err;
       // The caller gave up (shutdown, cancelled job) — stop immediately rather
@@ -130,10 +132,36 @@ export async function callWithRetry(
       if (attempt === attempts) break;
 
       const delay = baseDelay * 2 ** (attempt - 1);
+      // The SDK's own error log is replaced by the provider's `onError`, so
+      // this is the only trace of an attempt that failed and was retried: a
+      // gateway flapping 5xx behind eventual successes would otherwise be
+      // invisible.
+      const reason = err instanceof Error ? err.message : String(err);
+      const status = err instanceof ProviderError && err.status !== undefined ? ` (${err.status})` : "";
+      console.warn(
+        `[triage] ${input.app} ${input.tag}: attempt ${attempt}/${attempts} failed${status}: ${reason}; retrying in ${delay}ms`,
+      );
       // oxlint-disable-next-line no-await-in-loop -- backoff is sequential by nature
       await Bun.sleep(delay);
     }
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/**
+ * Reject when `signal` aborts, whether or not `work` noticed.
+ *
+ * Passing the signal down is not enough: it only helps while something is
+ * still listening to it. The SDK once swallowed a refused request and left its
+ * result pending after the request was over, and the sweep, the poll job and
+ * every later poll behind croner's `protect` waited on it for 42h.
+ */
+function settleBy<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    void work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }

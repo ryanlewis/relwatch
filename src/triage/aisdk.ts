@@ -90,6 +90,7 @@ const anthropic = createAnthropic({
 });
 
 const openaiGenerate: Generate = async (prompt, abortSignal) => {
+  let failure: unknown;
   const stream = streamObject({
     model: openai.responses(OPENAI_MODEL),
     schema: TriageSchema,
@@ -100,6 +101,14 @@ const openaiGenerate: Generate = async (prompt, abortSignal) => {
     // streamObject rather than generateObject. max_output_tokens is rejected
     // outright, so it is deliberately not set anywhere.
     providerOptions: { openai: { store: false } },
+    // A failed request arrives only here. The SDK logs it, ends the partial
+    // stream cleanly and never settles `.object`, so a refused call (a 401
+    // from the gateway, seen for real) hung the sweep forever: the request was
+    // already over, so the timeout signal had nothing left to abort, and
+    // croner's `protect` then skipped every later poll for 42h.
+    onError: ({ error }) => {
+      failure ??= error;
+    },
   });
 
   // The stream MUST be drained before awaiting `.object`.
@@ -118,6 +127,7 @@ const openaiGenerate: Generate = async (prompt, abortSignal) => {
   // half-formed triage; draining is the point.
   for await (const partial of stream.partialObjectStream) void partial;
 
+  if (failure !== undefined) throw failure;
   return await stream.object;
 };
 

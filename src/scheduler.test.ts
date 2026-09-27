@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DIGEST_CRON, POLL_CRON, TZ } from "./config.js";
 import { Store } from "./db.js";
 import { guard, pollAndTriage, safeCron, startScheduler, type SchedulerDeps } from "./scheduler.js";
@@ -6,7 +6,13 @@ import type { SourceRegistry } from "./poll.js";
 import type { FetchOptions, FetchResult, Source } from "./source/index.js";
 import { ProviderError, type Provider } from "./triage/index.js";
 import type { ReleaseInput, Triage } from "./triage/schema.js";
+import { AiSdkProvider } from "./triage/aisdk.js";
 import { StubProvider } from "./triage/stub.js";
+
+// Restored after every test rather than at the end of the ones that stub it: a
+// failed expectation would skip that last line and leave every later test in
+// the process talking to a stub.
+afterEach(restoreFetch);
 
 const OK: Triage = { verdict: "major", summary: "s", breaking: false, highlights: [] };
 
@@ -259,7 +265,6 @@ describe("scheduled jobs, triggered manually", () => {
     expect(d.store.digestSet()).toHaveLength(0);
     scheduler.stop();
     d.store.close();
-    restoreFetch();
   });
 
   test("a failing job is swallowed rather than escaping the cron callback", async () => {
@@ -285,15 +290,77 @@ describe("scheduled jobs, triggered manually", () => {
   });
 });
 
+describe("a triage call that fails or hangs", () => {
+  // croner's `protect` skips a tick while the previous run is still going, so
+  // a poll whose triage never settles silences every poll after it. Seen for
+  // real: a 401 from the LLM gateway left the SDK's result pending and no
+  // poll ran for 42h while the digest cron kept firing. Each case triggers
+  // the real job twice and requires the second to reach triage again.
+
+  test("a refused request still lets the next poll run", async () => {
+    const calls = stubFetch(401, INVALID_API_KEY);
+    const d = deps({ provider: new AiSdkProvider("openai-responses") });
+    const scheduler = startScheduler({ ...d, retry: { attempts: 1, baseDelayMs: 0 } });
+    const pollJob = scheduler.jobs[0]!;
+
+    await pollJob.trigger();
+    expect(pollJob.isBusy()).toBe(false);
+    expect(d.store.listReleases()[0]?.triage_error).toBe("Incorrect API key provided");
+
+    await pollJob.trigger();
+    expect(calls).toHaveLength(2);
+
+    scheduler.stop();
+    d.store.close();
+  });
+
+  test("a call that never settles still lets the next poll run", async () => {
+    let calls = 0;
+    const wedged: Provider = {
+      name: "wedged",
+      triage: () => {
+        calls++;
+        return new Promise<Triage>(() => undefined);
+      },
+    };
+    const d = deps({ provider: wedged });
+    const scheduler = startScheduler({ ...d, retry: { attempts: 1, baseDelayMs: 0, timeoutMs: 10 } });
+    const pollJob = scheduler.jobs[0]!;
+
+    await pollJob.trigger();
+    expect(pollJob.isBusy()).toBe(false);
+    expect(d.store.counts().releases).toBe(1);
+    expect(d.store.untriagedReleases()).toHaveLength(1);
+
+    await pollJob.trigger();
+    expect(calls).toBe(2);
+
+    scheduler.stop();
+    d.store.close();
+  });
+});
+
+/** The body the OpenAI-shaped gateway sends with a 401 for a rejected credential. */
+const INVALID_API_KEY = JSON.stringify({
+  error: {
+    message: "Incorrect API key provided",
+    type: "invalid_request_error",
+    code: "invalid_api_key",
+    param: null,
+  },
+});
+
 const realFetch = globalThis.fetch;
 
-function stubFetch(status: number): string[] {
+function stubFetch(status: number, body = "{}"): string[] {
   const calls: string[] = [];
   const handler: (input: string | Request | URL, init?: RequestInit) => Promise<Response> = (
     input,
   ) => {
     calls.push(typeof input === "string" ? input : input instanceof Request ? input.url : input.href);
-    return Promise.resolve(new Response("{}", { status }));
+    return Promise.resolve(
+      new Response(body, { status, headers: { "content-type": "application/json" } }),
+    );
   };
   globalThis.fetch = Object.assign(handler, { preconnect: realFetch.preconnect });
   return calls;
