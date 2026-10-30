@@ -8,6 +8,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, NoObjectGeneratedError, streamObject } from "ai";
 import {
+  ANTHROPIC_API_KEY,
   ANTHROPIC_BASE,
   ANTHROPIC_MODEL,
   BACKEND,
@@ -86,7 +87,7 @@ const openai = createOpenAI({
 
 const anthropic = createAnthropic({
   baseURL: ANTHROPIC_BASE,
-  apiKey: "unused",
+  apiKey: ANTHROPIC_API_KEY,
 });
 
 const openaiGenerate: Generate = async (prompt, abortSignal) => {

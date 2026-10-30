@@ -131,6 +131,7 @@ list; `example/relwatch.service` is a working starting point.
 |---|---|---|
 | `RW_DB` | `~/.local/share/relwatch/relwatch.db` | Created on first run, with its parent |
 | `RW_PORT` | `8000` | |
+| `RW_HOST` | `0.0.0.0` | Set `127.0.0.1` when the reverse proxy runs on the same host, so nothing can reach relwatch around it and forge the admin header |
 | `RW_BASE_PATH` | *(root)* | Sub-path when mounted behind a reverse proxy, e.g. `/releases` |
 | `RW_ADMIN_EMAILS` | *(empty)* | Comma-separated. **Empty means nobody is an admin** |
 | `RW_DASHBOARD_URL` | *(none)* | Absolute URL, used only for the digest's links |
@@ -142,6 +143,7 @@ list; `example/relwatch.service` is a working starting point.
 | `RW_OPENAI_MODEL` | `gpt-5.5` | |
 | `RW_ANTHROPIC_BASE` | `https://llm.int.exe.xyz/anthropic/v1` | |
 | `RW_ANTHROPIC_MODEL` | `claude-opus-5` | |
+| `RW_ANTHROPIC_API_KEY` | *(none)* | Only for an endpoint that needs a key, such as `https://api.anthropic.com/v1`. Put it in a `0600` `EnvironmentFile`, not the unit |
 | `RW_LLM_CONCURRENCY` | `4` | |
 | `RW_TIMEOUT` | `90s` | Per LLM call. Reasoning models are slow |
 | `RW_RETRY_ATTEMPTS` | `3` | Retries on 5xx/429 only |
@@ -170,7 +172,9 @@ back to the default and logs, rather than crash-looping.
 The two base URLs default to gateways on an [exe.dev](https://exe.dev) host
 network, which authenticate the calling machine rather than a key — which is
 why relwatch holds no LLM credentials on disk. Point them at any compatible
-endpoint. The `openai-responses` backend targets the **Responses** API and
+endpoint. To use Anthropic's API directly, set `RW_BACKEND=anthropic`,
+`RW_ANTHROPIC_BASE=https://api.anthropic.com/v1` and `RW_ANTHROPIC_API_KEY`.
+The `openai-responses` backend targets the **Responses** API and
 requires `stream: true` with `store: false`; `anthropic` targets Messages.
 That difference is the entire reason `src/triage/` has a provider seam.
 
