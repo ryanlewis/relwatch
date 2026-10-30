@@ -84,6 +84,9 @@ export const OPENAI_MODEL = process.env.RW_OPENAI_MODEL ?? "gpt-5.5";
 export const ANTHROPIC_BASE =
   process.env.RW_ANTHROPIC_BASE ?? "https://llm.int.exe.xyz/anthropic/v1";
 export const ANTHROPIC_MODEL = process.env.RW_ANTHROPIC_MODEL ?? "claude-opus-5";
+// Only needed off the gateway, e.g. RW_ANTHROPIC_BASE=https://api.anthropic.com/v1.
+// The SDK insists on a non-empty key, so the gateway gets a placeholder.
+export const ANTHROPIC_API_KEY = process.env.RW_ANTHROPIC_API_KEY?.trim() || "unused";
 
 export const LLM_CONCURRENCY = intEnv(process.env.RW_LLM_CONCURRENCY, 4, 1);
 // A single transient spike request hung past 110 s where every other run took
