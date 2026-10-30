@@ -103,6 +103,9 @@ export const DB_PATH = expandHome(
 
 // --- Web -------------------------------------------------------------------
 export const PORT = intEnv(process.env.RW_PORT, 8000, 1);
+// Admin rights come from a proxy-set header, so behind a proxy that isn't the
+// only way in, bind to loopback (127.0.0.1) and let the proxy be the one route.
+export const HOST = process.env.RW_HOST?.trim() || "0.0.0.0";
 
 /**
  * Sub-path the dashboard is served under, for a deployment that mounts it behind

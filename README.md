@@ -131,6 +131,7 @@ list; `example/relwatch.service` is a working starting point.
 |---|---|---|
 | `RW_DB` | `~/.local/share/relwatch/relwatch.db` | Created on first run, with its parent |
 | `RW_PORT` | `8000` | |
+| `RW_HOST` | `0.0.0.0` | Set `127.0.0.1` when the reverse proxy runs on the same host, so nothing can reach relwatch around it and forge the admin header |
 | `RW_BASE_PATH` | *(root)* | Sub-path when mounted behind a reverse proxy, e.g. `/releases` |
 | `RW_ADMIN_EMAILS` | *(empty)* | Comma-separated. **Empty means nobody is an admin** |
 | `RW_DASHBOARD_URL` | *(none)* | Absolute URL, used only for the digest's links |
