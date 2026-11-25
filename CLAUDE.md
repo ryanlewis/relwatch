@@ -19,6 +19,7 @@ bun run lint                  # oxlint --type-aware
 bun run typecheck             # tsc --noEmit
 bun test
 bun run build                 # bun build --compile → ./relwatch
+bun run build:linux           # deploy artefact, on the .bun-version Bun → ./relwatch-linux
 
 RW_BACKEND=stub bun run start # whole service, no LLM gateway needed
 ```

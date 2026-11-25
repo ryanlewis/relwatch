@@ -348,9 +348,14 @@ ids to go with it.
 One process, one SQLite file, one systemd unit.
 
 ```sh
-bun build --compile --target=bun-linux-x64 --outfile relwatch-linux src/index.ts
+bun run build:linux
 scp relwatch-linux user@host:/opt/relwatch/relwatch
 ```
+
+`build:linux` compiles with exactly the Bun named in `.bun-version`, fetched
+through [mise](https://mise.jdx.dev), because the binary embeds the runtime that
+built it. If the binary reports any other version, the script deletes it and
+fails. The check runs the binary, so build on Linux x86-64.
 
 The compiled binary is ~96 MB and never delta-compresses, so it is a deploy
 artefact rather than something to commit — `.gitignore` keeps both compile
